@@ -1,21 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import * as AWS from 'aws-sdk';
+import * as jwksRsa from 'jwks-rsa';
+import { JwtPayload } from 'aws-jwt-verify/jwt-model';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKeyProvider: (req, rawJwtToken, done) => {
-        const cognitoIssuer = `https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}`;
-        AWS.config.region = process.env.AWS_REGION;
-        done(null, cognitoIssuer);
-      },
+      ignoreExpiration: false,
+      secretOrKeyProvider: jwksRsa.passportJwtSecret({
+        cache: true,
+        rateLimit: true,
+        jwksRequestsPerMinute: 5,
+        jwksUri: `https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}/.well-known/jwks.json`,
+      }),
+      //audience: process.env.COGNITO_CLIENT_ID,
+      issuer: `https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}`,
+      algorithms: ['RS256'],
     });
   }
-  validate(payload: Partial<{ sub: string; email: string }>) {
-    return { userId: payload.sub, email: payload.email };
+
+  validate(payload: JwtPayload) {
+    return {
+      sub: payload.sub,
+      user: payload.username,
+      groups: payload['cognito:groups'],
+    };
   }
 }

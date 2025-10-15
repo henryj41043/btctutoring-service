@@ -7,10 +7,17 @@ import { UsersController } from './users/users.controller';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
 import { JwtStrategy } from './auth/jwt.strategy';
+import { PassportModule } from '@nestjs/passport';
 
 @Module({
-  imports: [DynamodbModule.forRoot(), AuthModule, ConfigModule.forRoot()],
+  imports: [
+    DynamodbModule.forRoot(),
+    AuthModule,
+    ConfigModule.forRoot(),
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+  ],
   controllers: [AppController, UsersController],
   providers: [AppService, UsersService, JwtStrategy],
+  exports: [PassportModule],
 })
 export class AppModule {}
