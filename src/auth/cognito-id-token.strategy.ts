@@ -5,10 +5,13 @@ import * as jwksRsa from 'jwks-rsa';
 import { JwtPayload } from 'aws-jwt-verify/jwt-model';
 
 @Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy) {
+export class CognitoIdTokenStrategy extends PassportStrategy(
+  Strategy,
+  'cognito-id-token',
+) {
   constructor() {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromHeader('X-ID-Token'),
       ignoreExpiration: false,
       secretOrKeyProvider: jwksRsa.passportJwtSecret({
         cache: true,
@@ -24,8 +27,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   validate(payload: JwtPayload) {
     return {
-      username: payload.username,
+      username: payload['cognito:username'],
       groups: payload['cognito:groups'],
+      email: payload.email,
     };
   }
 }
