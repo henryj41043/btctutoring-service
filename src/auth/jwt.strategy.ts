@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import * as jwksRsa from 'jwks-rsa';
 import { JwtPayload } from 'aws-jwt-verify/jwt-model';
+import { User } from '../models/user.model';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -22,10 +23,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: JwtPayload) {
+  validate(payload: JwtPayload): User {
     return {
       username: payload.username,
       groups: payload['cognito:groups'],
-    };
+    } as User;
   }
 }
