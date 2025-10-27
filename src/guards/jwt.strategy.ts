@@ -35,7 +35,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     req: express.Request,
     accessPayload: JwtPayload,
   ): Promise<User> {
-    const idToken: string = req.headers['X-ID-Token'] as string;
+    const idToken: string = req.headers['x-id-token'] as string;
     return await this.verifier
       .verify(idToken)
       .then((idPayload: CognitoJwtPayload) => {

@@ -27,7 +27,7 @@ export class ClientsController {
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
+    const isAdmin: boolean = user.groups.includes('Admins');
     if (!isAdmin) {
       Logger.error('Only Admins have access to client data');
       return Promise.reject(new Error('Unauthorized'));
@@ -46,7 +46,7 @@ export class ClientsController {
     @Body() client: Client,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
+    const isAdmin: boolean = user.groups.includes('Admins');
     if (!isAdmin) {
       Logger.error('Only Admins have access to client data');
       return Promise.reject(new Error('Unauthorized'));
@@ -62,8 +62,8 @@ export class ClientsController {
     @Body() client: Client,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
-    const isTutor: boolean = user.groups.includes('tutor');
+    const isAdmin: boolean = user.groups.includes('Admins');
+    const isTutor: boolean = user.groups.includes('Tutors');
     if (isAdmin || isTutor) {
       return this.clientsService.updateClient(client);
     } else {
@@ -79,7 +79,7 @@ export class ClientsController {
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
+    const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
       return this.clientsService.deleteClient(id);
     } else {

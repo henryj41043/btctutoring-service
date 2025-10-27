@@ -28,8 +28,8 @@ export class SessionsController {
     @Query('student') student: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
-    const isTutor: boolean = user.groups.includes('tutor');
+    const isAdmin: boolean = user.groups.includes('Admins');
+    const isTutor: boolean = user.groups.includes('Tutors');
     const idMatchesTutor: boolean = tutor === user.email;
     if (tutor && student) {
       if (isAdmin || (isTutor && idMatchesTutor)) {
@@ -59,7 +59,7 @@ export class SessionsController {
     @Body() session: Session,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
+    const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
       return this.sessionsService.createSession(session);
     } else {
@@ -75,8 +75,8 @@ export class SessionsController {
     @Body() session: Session,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
-    const isTutor: boolean = user.groups.includes('tutor');
+    const isAdmin: boolean = user.groups.includes('Admins');
+    const isTutor: boolean = user.groups.includes('Tutors');
     const idMatchesTutor: boolean = session.tutor === user.email;
     if (isAdmin || (isTutor && idMatchesTutor)) {
       return this.sessionsService.updateSession(session);
@@ -93,7 +93,7 @@ export class SessionsController {
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('admin');
+    const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
       return this.sessionsService.deleteSession(id);
     } else {
