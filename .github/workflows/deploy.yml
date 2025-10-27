@@ -48,5 +48,5 @@ jobs:
           ECR_REPOSITORY: btctutoring/btctutoring-service
           IMAGE_TAG: ${{ vars.ECR_IMAGE }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker buildx create --name builder --use
+          docker buildx build --platform linux/arm64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --push .
