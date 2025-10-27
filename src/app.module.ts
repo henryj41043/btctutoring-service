@@ -4,10 +4,10 @@ import { AppService } from './app.service';
 import { DynamodbModule } from './dynamodb/dynamodb.module';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
-import { JwtStrategy } from './auth/jwt.strategy';
+import { JwtStrategy } from './guards/jwt.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { SessionsModule } from './sessions/sessions.module';
-import { UserModule } from './user/user.module';
+import { ClientsModule } from './clients/clients.module';
 
 @Module({
   imports: [
@@ -16,7 +16,7 @@ import { UserModule } from './user/user.module';
     ConfigModule.forRoot(),
     PassportModule.register({}),
     SessionsModule,
-    UserModule,
+    ClientsModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],
