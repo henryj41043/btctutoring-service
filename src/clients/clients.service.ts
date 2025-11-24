@@ -41,6 +41,7 @@ export class ClientsService {
       .save()
       .then(() => {
         return Promise.resolve({
+          id: client.client,
           message: 'Client created successfully.',
         });
       })
@@ -76,7 +77,7 @@ export class ClientsService {
     })
       .then(() => {
         return Promise.resolve({
-          client: id,
+          id: id,
           message: 'Client deleted successfully.',
         });
       })

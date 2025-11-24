@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Logger,
+  Param,
   Post,
   Put,
   Query,
@@ -72,11 +73,11 @@ export class ClientsController {
     }
   }
 
-  @Delete()
+  @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
   async deleteClient(
     @Request() req: express.Request,
-    @Query('id') id: string,
+    @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
