@@ -7,8 +7,8 @@ import { randomUUID } from 'crypto';
 export class SessionsService {
   async getSessions(tutor: string, student: string) {
     return SessionsModel.scan({
-      tutor: { eq: tutor },
-      student: { eq: student },
+      tutor_id: { eq: tutor },
+      student_id: { eq: student },
     })
       .exec()
       .then((sessions) => {
@@ -22,7 +22,7 @@ export class SessionsService {
 
   async getSessionsByTutor(tutor: string) {
     return SessionsModel.scan({
-      tutor: { eq: tutor },
+      tutor_id: { eq: tutor },
     })
       .exec()
       .then((sessions) => {
@@ -36,7 +36,7 @@ export class SessionsService {
 
   async getSessionsByStudent(student: string) {
     return SessionsModel.scan({
-      student: { eq: student },
+      student_id: { eq: student },
     })
       .exec()
       .then((sessions) => {
@@ -64,12 +64,14 @@ export class SessionsService {
     const newUuid: string = randomUUID();
     const newSession = new SessionsModel({
       id: newUuid,
-      tutor: session.tutor,
-      student: session.student,
-      start: session.start,
-      end: session.end,
-      completed: session.completed,
-      makeup: session.makeup,
+      end_datetime: session.end_datetime,
+      notes: session.notes,
+      start_datetime: session.start_datetime,
+      status: session.status,
+      student_id: session.student_id,
+      student_name: session.student_name,
+      tutor_id: session.tutor_id,
+      tutor_name: session.tutor_name,
     });
     return newSession
       .save()
@@ -91,12 +93,14 @@ export class SessionsService {
         id: session.id,
       },
       {
-        tutor: session.tutor,
-        student: session.student,
-        start: session.start,
-        end: session.end,
-        completed: session.completed,
-        makeup: session.makeup,
+        end_datetime: session.end_datetime,
+        notes: session.notes,
+        start_datetime: session.start_datetime,
+        status: session.status,
+        student_id: session.student_id,
+        student_name: session.student_name,
+        tutor_id: session.tutor_id,
+        tutor_name: session.tutor_name,
       },
     )
       .then((updatedSession) => {

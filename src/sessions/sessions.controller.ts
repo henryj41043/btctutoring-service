@@ -78,7 +78,7 @@ export class SessionsController {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     const isTutor: boolean = user.groups.includes('Tutors');
-    const idMatchesTutor: boolean = session.tutor === user.email;
+    const idMatchesTutor: boolean = session.tutor_id === user.email;
     if (isAdmin || (isTutor && idMatchesTutor)) {
       return this.sessionsService.updateSession(session);
     } else {
