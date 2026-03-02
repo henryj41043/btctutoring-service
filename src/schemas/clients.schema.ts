@@ -10,7 +10,6 @@ export const ClientsSchema = new dynamoose.Schema({
   btc_and_me_enrolled: Boolean,
   completed_sessions: Number,
   inquiry_date: String,
-  interview_scheduled: Boolean,
   makeup_sessions: Number,
   notes: String,
   package: String,

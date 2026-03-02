@@ -8,6 +8,7 @@ import { JwtStrategy } from './guards/jwt.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { SessionsModule } from './sessions/sessions.module';
 import { ClientsModule } from './clients/clients.module';
+import { EmployeesModule } from './employees/employees.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ClientsModule } from './clients/clients.module';
     PassportModule.register({}),
     SessionsModule,
     ClientsModule,
+    EmployeesModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],

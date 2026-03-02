@@ -5,7 +5,6 @@ export class Client {
   btc_and_me_enrolled: boolean;
   completed_sessions: number;
   inquiry_date: string;
-  interview_scheduled: boolean;
   makeup_sessions: number;
   notes: string;
   package: string;

@@ -11,48 +11,48 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ClientsService } from './clients.service';
+import { EmployeesService } from './employees.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
-import { Client } from '../models/client.model';
+import { Employee } from '../models/employee.model';
 
-@Controller('clients')
-export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+@Controller('employees')
+export class EmployeesController {
+  constructor(private readonly employeesService: EmployeesService) {}
 
   @Get()
   @UseGuards(AuthGuard('jwt'))
-  async getClients(
+  async getEmployees(
     @Request() req: express.Request,
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (!isAdmin) {
-      Logger.error('Only Admins have access to client data');
+      Logger.error('Only Admins have access to employee data');
       return Promise.reject(new Error('Unauthorized'));
     }
     if (id) {
-      return this.clientsService.getClient(id);
+      return this.employeesService.getEmployee(id);
     } else {
-      return this.clientsService.getAllClients();
+      return this.employeesService.getAllEmployees();
     }
   }
 
   @Post()
   @UseGuards(AuthGuard('jwt'))
-  async createClient(
+  async createEmployee(
     @Request() req: express.Request,
-    @Body() client: Client,
+    @Body() employee: Employee,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (!isAdmin) {
-      Logger.error('Only Admins have access to client data');
+      Logger.error('Only Admins have access to employee data');
       return Promise.reject(new Error('Unauthorized'));
     } else {
-      return this.clientsService.createClient(client);
+      return this.employeesService.createEmployee(employee);
     }
   }
 
@@ -60,15 +60,14 @@ export class ClientsController {
   @UseGuards(AuthGuard('jwt'))
   async updateClient(
     @Request() req: express.Request,
-    @Body() client: Client,
+    @Body() employee: Employee,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
-    const isTutor: boolean = user.groups.includes('Tutors');
-    if (isAdmin || isTutor) {
-      return this.clientsService.updateClient(client);
+    if (isAdmin) {
+      return this.employeesService.updateEmployee(employee);
     } else {
-      Logger.error('Invalid credentials for updating client data');
+      Logger.error('Only Admins have access to employee data');
       return Promise.reject(new Error('Unauthorized'));
     }
   }
@@ -82,9 +81,9 @@ export class ClientsController {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
-      return this.clientsService.deleteClient(id);
+      return this.employeesService.deleteEmployee(id);
     } else {
-      Logger.error('Only Admins have access to client data');
+      Logger.error('Only Admins have access to employee data');
       return Promise.reject(new Error('Unauthorized'));
     }
   }
