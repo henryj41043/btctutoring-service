@@ -77,7 +77,7 @@ export class AuthController {
     return this.authService.adminCreateUser(dto.email, dto.group);
   }
 
-  @Delete('user:id')
+  @Delete('user/:id')
   @UseGuards(AuthGuard('jwt'))
   async deleteUser(
     @Request() req: express.Request,
