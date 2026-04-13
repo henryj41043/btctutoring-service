@@ -7,8 +7,9 @@ import { ConfigModule } from '@nestjs/config';
 import { JwtStrategy } from './guards/jwt.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { SessionsModule } from './sessions/sessions.module';
-import { ClientsModule } from './clients/clients.module';
-import { EmployeesModule } from './employees/employees.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { StudentsModule } from './students/students.module';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -17,8 +18,9 @@ import { EmployeesModule } from './employees/employees.module';
     ConfigModule.forRoot(),
     PassportModule.register({}),
     SessionsModule,
-    ClientsModule,
-    EmployeesModule,
+    ContactsModule,
+    StudentsModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],

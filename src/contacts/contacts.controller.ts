@@ -11,79 +11,80 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { EmployeesService } from './employees.service';
+import { ContactsService } from './contacts.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
-import { Employee } from '../models/employee.model';
+import { Contact } from '../models/contact.model';
 
-@Controller('employees')
-export class EmployeesController {
-  constructor(private readonly employeesService: EmployeesService) {}
+@Controller('contacts')
+export class ContactsController {
+  constructor(private readonly contactsService: ContactsService) {}
 
   @Get()
   @UseGuards(AuthGuard('jwt'))
-  async getEmployees(
+  async getContacts(
     @Request() req: express.Request,
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
-    if (!isAdmin) {
-      Logger.error('Only Admins have access to employee data');
-      return Promise.reject(new Error('Unauthorized'));
-    }
-    if (id) {
-      return this.employeesService.getEmployee(id);
+    if (isAdmin) {
+      if (id) {
+        return this.contactsService.getContact(id);
+      } else {
+        return this.contactsService.getContacts();
+      }
     } else {
-      return this.employeesService.getAllEmployees();
+      Logger.error('User not authorized to get contacts');
+      return Promise.reject(new Error('Unauthorized'));
     }
   }
 
   @Post()
   @UseGuards(AuthGuard('jwt'))
-  async createEmployee(
+  async createContact(
     @Request() req: express.Request,
-    @Body() employee: Employee,
-  ): Promise<any> {
+    @Body() contact: Contact,
+  ) {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
-    if (!isAdmin) {
-      Logger.error('Only Admins have access to employee data');
-      return Promise.reject(new Error('Unauthorized'));
+    if (isAdmin) {
+      return this.contactsService.createContact(contact);
     } else {
-      return this.employeesService.createEmployee(employee);
+      Logger.error('User not authorized to create contacts');
+      return Promise.reject(new Error('Unauthorized'));
     }
   }
 
   @Put()
   @UseGuards(AuthGuard('jwt'))
-  async updateClient(
+  async updateContact(
     @Request() req: express.Request,
-    @Body() employee: Employee,
-  ): Promise<any> {
+    @Body() contact: Contact,
+  ) {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
-      return this.employeesService.updateEmployee(employee);
+      return this.contactsService.updateContact(contact);
     } else {
-      Logger.error('Only Admins have access to employee data');
+      Logger.error('User not authorized to update contacts');
       return Promise.reject(new Error('Unauthorized'));
     }
   }
 
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
-  async deleteClient(
+  async deleteContact(
     @Request() req: express.Request,
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
-      return this.employeesService.deleteEmployee(id);
+      return this.contactsService.deleteContact(id);
     } else {
-      Logger.error('Only Admins have access to employee data');
+      Logger.error('User not authorized to delete contacts');
       return Promise.reject(new Error('Unauthorized'));
     }
   }

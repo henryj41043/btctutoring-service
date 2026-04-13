@@ -1,16 +1,13 @@
 import * as dynamoose from 'dynamoose';
 
-export const EmployeesSchema = new dynamoose.Schema({
-  email: {
+export const ContactsSchema = new dynamoose.Schema({
+  id: {
     type: String,
     hashKey: true,
   },
   first_name: String,
   last_name: String,
+  email: String,
   phone_number: String,
-  group: String,
-  status: String,
   service: String,
-  notes: String,
-  interview_scheduled: Boolean,
 });
