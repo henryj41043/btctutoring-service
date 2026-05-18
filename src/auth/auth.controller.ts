@@ -74,7 +74,7 @@ export class AuthController {
       Logger.error('Only Admins have access to user data');
       return Promise.reject(new Error('Unauthorized'));
     }
-    return this.authService.adminCreateUser(dto.email, dto.group);
+    return this.authService.adminCreateUser(dto.email, dto.group, dto.id);
   }
 
   @Delete('user/:id')

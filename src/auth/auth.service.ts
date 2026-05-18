@@ -131,6 +131,7 @@ export class AuthService {
   async adminCreateUser(
     email: string,
     group: string,
+    id: string,
   ): Promise<ResponseDto | UserType> {
     const createUserCommand = new AdminCreateUserCommand({
       UserPoolId: this.userPoolId,
@@ -138,6 +139,7 @@ export class AuthService {
       UserAttributes: [
         { Name: 'email', Value: email },
         { Name: 'email_verified', Value: 'true' },
+        { Name: 'custom:contact_id', Value: id },
       ],
       DesiredDeliveryMediums: ['EMAIL'],
     });

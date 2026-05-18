@@ -47,6 +47,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             username: accessPayload.username,
             groups: accessPayload['cognito:groups'],
             email: idPayload.email,
+            contact: idPayload['custom:contact_id'],
           } as User;
         }
       })
