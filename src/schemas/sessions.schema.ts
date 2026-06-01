@@ -5,6 +5,7 @@ export const SessionsSchema = new dynamoose.Schema({
     type: String,
     hashKey: true,
   },
+  type: String,
   end_datetime: String,
   notes: String,
   start_datetime: String,

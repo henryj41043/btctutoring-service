@@ -64,6 +64,7 @@ export class SessionsService {
     const newUuid: string = randomUUID();
     const newSession = new SessionsModel({
       id: newUuid,
+      type: session.type,
       end_datetime: session.end_datetime,
       notes: session.notes,
       start_datetime: session.start_datetime,
@@ -93,6 +94,7 @@ export class SessionsService {
         id: session.id,
       },
       {
+        type: session.type,
         end_datetime: session.end_datetime,
         notes: session.notes,
         start_datetime: session.start_datetime,
