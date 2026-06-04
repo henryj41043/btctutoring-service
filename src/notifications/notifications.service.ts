@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { SessionsService } from '../sessions/sessions.service';
 import { ContactsService } from '../contacts/contacts.service';
-import { Session } from '../models/session.model';
+import { Session, SessionType } from '../models/session.model';
 
 @Injectable()
 export class NotificationsService {
@@ -37,11 +37,11 @@ export class NotificationsService {
       return;
     }
 
-    // Filter: TUTORING type, PENDING status, ended before start of today
+    // Filter: TUTORING type, Pending status, ended before start of today
     const staleSessions = allSessions.filter(
       (s) =>
-        s.type === 'TUTORING' &&
-        s.status === 'PENDING' &&
+        s.type === SessionType.TUTORING &&
+        s.status === 'Pending' &&
         s.end_datetime &&
         new Date(s.end_datetime) < startOfToday,
     );
