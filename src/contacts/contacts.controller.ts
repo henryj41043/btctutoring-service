@@ -28,13 +28,17 @@ export class ContactsController {
     @Query('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       if (id) {
         return this.contactsService.getContact(id);
       } else {
         return this.contactsService.getContacts();
       }
+    } else if (id && id === user.contact) {
+      // Any authenticated user may fetch their own contact record.
+      // This is required by the login flow to load the user's profile.
+      return this.contactsService.getContact(id);
     } else {
       Logger.error('User not authorized to get contacts');
       return Promise.reject(new Error('Unauthorized'));
@@ -48,7 +52,7 @@ export class ContactsController {
     @Body() contact: Contact,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.contactsService.createContact(contact);
     } else {
@@ -64,7 +68,7 @@ export class ContactsController {
     @Body() contact: Contact,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.contactsService.updateContact(contact);
     } else {
@@ -80,7 +84,7 @@ export class ContactsController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.contactsService.deleteContact(id);
     } else {
