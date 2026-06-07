@@ -1,5 +1,23 @@
-import { IsDate, IsOptional } from 'class-validator';
+import {
+  IsArray,
+  IsDate,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class AvailabilityBlock {
+  @IsArray()
+  @IsString({ each: true })
+  days: string[];
+
+  @IsString()
+  start_time: string;
+
+  @IsString()
+  end_time: string;
+}
 
 export class Contact {
   id?: string;
@@ -61,7 +79,11 @@ export class Contact {
   registration_received?: Date;
   title?: string;
   currently_accepting_students?: boolean;
-  tutoring_availability?: string;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilityBlock)
+  availability?: AvailabilityBlock[];
   zoom_link?: string;
   hourly_rate?: number;
   @IsOptional()

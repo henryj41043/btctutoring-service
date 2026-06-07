@@ -39,7 +39,22 @@ export const ContactsSchema = new dynamoose.Schema({
   registration_received: Date,
   title: String,
   currently_accepting_students: Boolean,
+  // Deprecated: replaced by structured `availability` below. Kept so reads of
+  // pre-existing records with free-text availability don't error.
   tutoring_availability: String,
+  availability: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          days: { type: Array, schema: [String] },
+          start_time: String,
+          end_time: String,
+        },
+      },
+    ],
+  },
   zoom_link: String,
   hourly_rate: Number,
   hiring_inquiry_received: Date,
