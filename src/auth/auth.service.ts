@@ -12,6 +12,9 @@ import {
   AdminAddUserToGroupCommand,
   AdminDeleteUserCommand,
   InitiateAuthCommandOutput,
+  ChangePasswordCommand,
+  ForgotPasswordCommand,
+  ConfirmForgotPasswordCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import * as crypto from 'crypto';
 import { ResponseDto } from './dto/response.dto';
@@ -170,6 +173,84 @@ export class AuthService {
     } catch (error) {
       Logger.error(error);
       return { message: 'Delete user failed.' } as ResponseDto;
+    }
+  }
+
+  async changePassword(
+    accessToken: string,
+    previousPassword: string,
+    proposedPassword: string,
+  ): Promise<ResponseDto> {
+    const command = new ChangePasswordCommand({
+      AccessToken: accessToken,
+      PreviousPassword: previousPassword,
+      ProposedPassword: proposedPassword,
+    });
+    try {
+      await this.client.send(command);
+      return { message: 'Password changed successfully.', success: true };
+    } catch (error) {
+      Logger.error(error);
+      return { message: this.friendlyError(error), success: false };
+    }
+  }
+
+  async forgotPassword(email: string): Promise<ResponseDto> {
+    const command = new ForgotPasswordCommand({
+      ClientId: this.clientId,
+      Username: email,
+      SecretHash: this.getSecretHash(email),
+    });
+    try {
+      await this.client.send(command);
+      return {
+        message: 'If an account exists for that email, a reset code has been sent.',
+        success: true,
+      };
+    } catch (error) {
+      Logger.error(error);
+      return { message: this.friendlyError(error), success: false };
+    }
+  }
+
+  async confirmForgotPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<ResponseDto> {
+    const command = new ConfirmForgotPasswordCommand({
+      ClientId: this.clientId,
+      Username: email,
+      ConfirmationCode: code,
+      Password: newPassword,
+      SecretHash: this.getSecretHash(email),
+    });
+    try {
+      await this.client.send(command);
+      return { message: 'Password reset successfully.', success: true };
+    } catch (error) {
+      Logger.error(error);
+      return { message: this.friendlyError(error), success: false };
+    }
+  }
+
+  /** Maps common Cognito errors to user-friendly messages. */
+  private friendlyError(error: unknown): string {
+    const name = (error as { name?: string })?.name ?? '';
+    switch (name) {
+      case 'NotAuthorizedException':
+        return 'Current password is incorrect.';
+      case 'InvalidPasswordException':
+        return 'New password does not meet the requirements.';
+      case 'LimitExceededException':
+        return 'Too many attempts, please try again later.';
+      case 'CodeMismatchException':
+      case 'ExpiredCodeException':
+        return 'Invalid or expired code. Please request a new one.';
+      case 'UserNotFoundException':
+        return 'If an account exists for that email, a reset code has been sent.';
+      default:
+        return 'Request failed. Please try again.';
     }
   }
 }

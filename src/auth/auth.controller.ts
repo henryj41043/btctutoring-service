@@ -19,6 +19,9 @@ import { User } from '../models/user.model';
 import { CreateUserDto } from './dto/create.user.dto';
 import { NewPasswordDto } from './dto/new.password.dto';
 import { ResponseDto } from './dto/response.dto';
+import { ChangePasswordDto } from './dto/change.password.dto';
+import { ForgotPasswordDto } from './dto/forgot.password.dto';
+import { ConfirmForgotPasswordDto } from './dto/confirm.forgot.password.dto';
 import {
   AuthenticationResultType,
   UserType,
@@ -59,6 +62,37 @@ export class AuthController {
       dto.username,
       dto.newPassword,
       dto.session,
+    );
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard('jwt'))
+  async changePassword(
+    @Request() req: express.Request,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<ResponseDto> {
+    const authHeader: string = req.headers.authorization ?? '';
+    const accessToken: string = authHeader.replace(/^Bearer\s+/i, '');
+    return this.authService.changePassword(
+      accessToken,
+      dto.previousPassword,
+      dto.proposedPassword,
+    );
+  }
+
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto): Promise<ResponseDto> {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('confirm-forgot-password')
+  confirmForgotPassword(
+    @Body() dto: ConfirmForgotPasswordDto,
+  ): Promise<ResponseDto> {
+    return this.authService.confirmForgotPassword(
+      dto.email,
+      dto.code,
+      dto.newPassword,
     );
   }
 
