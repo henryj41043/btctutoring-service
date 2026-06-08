@@ -14,4 +14,5 @@ export const SessionsSchema = new dynamoose.Schema({
   student_name: String,
   tutor_id: String,
   tutor_name: String,
+  series_id: String,
 });

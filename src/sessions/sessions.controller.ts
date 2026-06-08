@@ -27,12 +27,17 @@ export class SessionsController {
     @Request() req: express.Request,
     @Query('tutor') tutor: string,
     @Query('student') student: string,
+    @Query('series') series: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     const isTutor: boolean = user.groups.includes('Tutors');
     const idMatchesTutor: boolean = tutor === user.email;
-    if (tutor && student) {
+    if (series) {
+      if (isAdmin) {
+        return this.sessionsService.getSessionsBySeries(series);
+      }
+    } else if (tutor && student) {
       if (isAdmin || (isTutor && idMatchesTutor)) {
         return this.sessionsService.getSessions(tutor, student);
       }
@@ -65,6 +70,22 @@ export class SessionsController {
       return this.sessionsService.createSession(session);
     } else {
       Logger.error('Creating new session is restricted to admins');
+      return Promise.reject(new Error('Unauthorized'));
+    }
+  }
+
+  @Post('batch')
+  @UseGuards(AuthGuard('jwt'))
+  async createSessions(
+    @Request() req: express.Request,
+    @Body() sessions: Session[],
+  ) {
+    const user: User = req.user as User;
+    const isAdmin: boolean = user.groups.includes('Admins');
+    if (isAdmin) {
+      return this.sessionsService.createSessions(sessions);
+    } else {
+      Logger.error('Creating sessions is restricted to admins');
       return Promise.reject(new Error('Unauthorized'));
     }
   }

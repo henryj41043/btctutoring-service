@@ -1,5 +1,6 @@
 export enum SessionType {
   TUTORING = 'TUTORING',
+  MAKE_UP = 'MAKE_UP',
   ADMIN = 'ADMIN',
 }
 
@@ -14,4 +15,5 @@ export class Session {
   student_name?: string;
   tutor_id: string;
   tutor_name: string;
+  series_id?: string;
 }
