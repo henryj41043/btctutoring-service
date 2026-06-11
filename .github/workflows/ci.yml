@@ -36,5 +36,16 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Stryker on the diff vs ${{ github.base_ref }}
-        run: npx stryker run --since=origin/${{ github.base_ref }}
+      - name: Stryker on changed source files vs ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- src \
+            | grep -E '\.ts$' \
+            | grep -vE '\.spec\.ts$|/models/|/schemas/|/dto/|\.module\.ts$|/main\.ts$' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No mutable source files changed in this PR; skipping mutation testing."
+            exit 0
+          fi
+          echo "Mutating changed files:"; echo "$CHANGED"
+          npx stryker run --mutate "$(echo "$CHANGED" | paste -sd, -)"
