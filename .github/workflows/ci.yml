@@ -1,0 +1,40 @@
+name: CI
+
+# Pull-request gate: every check here must pass before a PR can merge to main.
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Lint, unit, integration + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - name: Unit + integration tests with 95% coverage gate
+        run: npm run test:cov
+      - name: End-to-end tests (mocked AWS + DynamoDB)
+        run: npm run test:e2e
+
+  mutation:
+    name: Mutation testing (changed files only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so Stryker can diff against the PR base branch.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Stryker on the diff vs ${{ github.base_ref }}
+        run: npx stryker run --since=origin/${{ github.base_ref }}

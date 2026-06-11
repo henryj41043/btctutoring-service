@@ -8,6 +8,7 @@ import {
   Logger,
   Delete,
   Param,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
@@ -106,7 +107,7 @@ export class AuthController {
     const isAdmin: boolean = user.groups.includes('Admins');
     if (!isAdmin) {
       Logger.error('Only Admins have access to user data');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
     return this.authService.adminCreateUser(dto.email, dto.group, dto.id);
   }
@@ -124,7 +125,7 @@ export class AuthController {
       return this.authService.adminDeleteUser(id);
     } else {
       Logger.error('Only Admins have access to user data');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 }

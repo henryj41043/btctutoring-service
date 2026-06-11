@@ -11,12 +11,30 @@ env:
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
 
 jobs:
+  test:
+    name: Tests + coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - name: Unit + integration tests with 95% coverage gate
+        run: npm run test:cov
+      - name: End-to-end tests (mocked AWS + DynamoDB)
+        run: npm run test:e2e
+
   deploy:
+    # Nothing ships to ECS unless every test suite passes.
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up QEMU for arm64
         run: |
@@ -32,7 +50,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

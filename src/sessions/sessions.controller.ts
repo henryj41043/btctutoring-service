@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -55,7 +56,7 @@ export class SessionsController {
       }
     }
     Logger.error('Invalid parameters for given user credentials');
-    return Promise.reject(new Error('Unauthorized'));
+    throw new ForbiddenException('Unauthorized');
   }
 
   @Post()
@@ -70,7 +71,7 @@ export class SessionsController {
       return this.sessionsService.createSession(session);
     } else {
       Logger.error('Creating new session is restricted to admins');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -86,7 +87,7 @@ export class SessionsController {
       return this.sessionsService.createSessions(sessions);
     } else {
       Logger.error('Creating sessions is restricted to admins');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -104,7 +105,7 @@ export class SessionsController {
       return this.sessionsService.updateSession(session);
     } else {
       Logger.error('Invalid credentials for the session being edited');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -120,7 +121,7 @@ export class SessionsController {
       return this.sessionsService.deleteSession(id);
     } else {
       Logger.error('Deleting a session is restricted to admins');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 }

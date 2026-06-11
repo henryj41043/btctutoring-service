@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -43,7 +44,7 @@ export class NotesController {
       }
     } else {
       Logger.error('User not authorized to get notes');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -56,7 +57,7 @@ export class NotesController {
       return this.notesService.createNote(note);
     } else {
       Logger.error('User not authorized to create notes');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -69,7 +70,7 @@ export class NotesController {
       return this.notesService.updateNote(note);
     } else {
       Logger.error('User not authorized to update notes');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -85,7 +86,7 @@ export class NotesController {
       return this.notesService.deleteNote(id);
     } else {
       Logger.error('User not authorized to delete notes');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 }
