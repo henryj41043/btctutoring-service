@@ -1,0 +1,51 @@
+name: CI
+
+# Pull-request gate: every check here must pass before a PR can merge to main.
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Lint, unit, integration + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - name: Unit + integration tests with 95% coverage gate
+        run: npm run test:cov
+      - name: End-to-end tests (mocked AWS + DynamoDB)
+        run: npm run test:e2e
+
+  mutation:
+    name: Mutation testing (changed files only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so Stryker can diff against the PR base branch.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Stryker on changed source files vs ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- src \
+            | grep -E '\.ts$' \
+            | grep -vE '\.spec\.ts$|/models/|/schemas/|/dto/|\.module\.ts$|/main\.ts$' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No mutable source files changed in this PR; skipping mutation testing."
+            exit 0
+          fi
+          echo "Mutating changed files:"; echo "$CHANGED"
+          npx stryker run --mutate "$(echo "$CHANGED" | paste -sd, -)"

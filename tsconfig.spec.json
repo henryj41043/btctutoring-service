@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Full-program emit (not per-file transpile) so emitDecoratorMetadata
+    // produces clean `design:paramtypes` references instead of the uncoverable
+    // `typeof X !== 'undefined' ? ... : Object` guard that transpile mode adds
+    // for every injected constructor param. Keeps branch coverage honest.
+    "isolatedModules": false
+  }
+}

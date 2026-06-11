@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -43,7 +44,7 @@ export class StudentsController {
       }
     } else {
       Logger.error('User not authorized to get students');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -59,7 +60,7 @@ export class StudentsController {
       return this.studentsService.createStudent(student);
     } else {
       Logger.error('User not authorized to create students');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -75,7 +76,7 @@ export class StudentsController {
       return this.studentsService.updateStudent(student);
     } else {
       Logger.error('User not authorized to update students');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -91,7 +92,7 @@ export class StudentsController {
       return this.studentsService.deleteStudent(id);
     } else {
       Logger.error('User not authorized to delete students');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 }

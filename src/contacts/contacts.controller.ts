@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -41,7 +42,7 @@ export class ContactsController {
       return this.contactsService.getContact(id);
     } else {
       Logger.error('User not authorized to get contacts');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -57,7 +58,7 @@ export class ContactsController {
       return this.contactsService.createContact(contact);
     } else {
       Logger.error('User not authorized to create contacts');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -73,7 +74,7 @@ export class ContactsController {
       return this.contactsService.updateContact(contact);
     } else {
       Logger.error('User not authorized to update contacts');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 
@@ -89,7 +90,7 @@ export class ContactsController {
       return this.contactsService.deleteContact(id);
     } else {
       Logger.error('User not authorized to delete contacts');
-      return Promise.reject(new Error('Unauthorized'));
+      throw new ForbiddenException('Unauthorized');
     }
   }
 }

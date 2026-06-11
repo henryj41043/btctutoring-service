@@ -31,7 +31,8 @@ export class NotificationsService {
 
     let allSessions: Session[];
     try {
-      allSessions = (await this.sessionsService.getAllSessions()) as unknown as Session[];
+      allSessions =
+        (await this.sessionsService.getAllSessions()) as unknown as Session[];
     } catch (err) {
       this.logger.error('Failed to fetch sessions for reminder job', err);
       return;
@@ -65,21 +66,21 @@ export class NotificationsService {
     for (const [tutorId, sessions] of byTutor) {
       try {
         const contacts = await this.contactsService.getContact(tutorId);
-        const tutor = contacts[0] as any;
+        const tutor = contacts[0] as
+          | { email?: string; first_name?: string; last_name?: string }
+          | undefined;
         if (!tutor?.email) {
           this.logger.warn(`No email found for tutor ${tutorId}, skipping.`);
           continue;
         }
-        const tutorName = `${tutor.first_name ?? ''} ${tutor.last_name ?? ''}`.trim();
+        const tutorName =
+          `${tutor.first_name ?? ''} ${tutor.last_name ?? ''}`.trim();
         await this.sendReminderEmail(tutor.email, tutorName, sessions);
         this.logger.log(
           `Reminder sent to ${tutor.email} for ${sessions.length} session(s).`,
         );
       } catch (err) {
-        this.logger.error(
-          `Failed to send reminder for tutor ${tutorId}`,
-          err,
-        );
+        this.logger.error(`Failed to send reminder for tutor ${tutorId}`, err);
       }
     }
   }
