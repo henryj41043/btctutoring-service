@@ -31,4 +31,18 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'warn'
     },
   },
+  {
+    // Test files legitimately use mocks, `require()` for jest.mock hoisting,
+    // and `any`/unbound-method patterns. Relax the type-aware safety rules
+    // there so they don't block the lint gate.
+    files: ['**/*.spec.ts', '**/*.int-spec.ts', 'test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );

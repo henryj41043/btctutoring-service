@@ -44,9 +44,9 @@ describe('SessionsService', () => {
     it('getSessions scans by tutor and student', async () => {
       const sessions = [sampleSession()];
       scanResolves(Model, sessions);
-      await expect(service.getSessions('tutor@example.com', 'student-1')).resolves.toBe(
-        sessions,
-      );
+      await expect(
+        service.getSessions('tutor@example.com', 'student-1'),
+      ).resolves.toBe(sessions);
       expect(Model.scan).toHaveBeenCalledWith({
         tutor_id: { eq: 'tutor@example.com' },
         student_id: { eq: 'student-1' },
@@ -64,7 +64,9 @@ describe('SessionsService', () => {
     it('getSessionsByStudent scans by student', async () => {
       scanResolves(Model, []);
       await service.getSessionsByStudent('student-1');
-      expect(Model.scan).toHaveBeenCalledWith({ student_id: { eq: 'student-1' } });
+      expect(Model.scan).toHaveBeenCalledWith({
+        student_id: { eq: 'student-1' },
+      });
     });
 
     it('getAllSessions scans everything', async () => {
@@ -76,7 +78,9 @@ describe('SessionsService', () => {
     it('getSessionsBySeries scans by series', async () => {
       scanResolves(Model, []);
       await service.getSessionsBySeries('series-1');
-      expect(Model.scan).toHaveBeenCalledWith({ series_id: { eq: 'series-1' } });
+      expect(Model.scan).toHaveBeenCalledWith({
+        series_id: { eq: 'series-1' },
+      });
     });
 
     it.each([
@@ -131,9 +135,9 @@ describe('SessionsService', () => {
 
     it('rejects when a batch write fails', async () => {
       Model.batchPut.mockRejectedValue(new Error('batch boom'));
-      await expect(
-        service.createSessions([sampleSession()]),
-      ).rejects.toThrow('batch boom');
+      await expect(service.createSessions([sampleSession()])).rejects.toThrow(
+        'batch boom',
+      );
     });
   });
 

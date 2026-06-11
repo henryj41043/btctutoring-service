@@ -61,7 +61,9 @@ describe('Auth (integration)', () => {
   });
 
   it('admin can create a user', async () => {
-    cognitoMock.on(AdminCreateUserCommand).resolves({ User: { Username: 'a@b.com' } });
+    cognitoMock
+      .on(AdminCreateUserCommand)
+      .resolves({ User: { Username: 'a@b.com' } });
     cognitoMock.on(AdminAddUserToGroupCommand).resolves({});
 
     const res = await request(server())

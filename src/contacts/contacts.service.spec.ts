@@ -46,7 +46,9 @@ describe('ContactsService', () => {
 
     it('rejects when the scan fails', async () => {
       scanRejects(Model, new Error('scan boom'));
-      await expect(service.getContact('contact-1')).rejects.toThrow('scan boom');
+      await expect(service.getContact('contact-1')).rejects.toThrow(
+        'scan boom',
+      );
     });
   });
 

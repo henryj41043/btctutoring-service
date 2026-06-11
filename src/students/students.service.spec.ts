@@ -48,7 +48,9 @@ describe('StudentsService', () => {
     it('getStudentsByContact scans by contact_id', async () => {
       scanResolves(Model, []);
       await service.getStudentsByContact('contact-1');
-      expect(Model.scan).toHaveBeenCalledWith({ contact_id: { eq: 'contact-1' } });
+      expect(Model.scan).toHaveBeenCalledWith({
+        contact_id: { eq: 'contact-1' },
+      });
     });
 
     it('getStudentsByTutor scans by assigned_tutor_id', async () => {

@@ -77,7 +77,9 @@ describe('AuthService', () => {
   describe('login', () => {
     it('returns the authentication result on success', async () => {
       const auth: AuthenticationResultType = { AccessToken: 'token' };
-      cognitoMock.on(InitiateAuthCommand).resolves({ AuthenticationResult: auth });
+      cognitoMock
+        .on(InitiateAuthCommand)
+        .resolves({ AuthenticationResult: auth });
       await expect(service.login('a@b.com', 'Pass1!')).resolves.toEqual(auth);
     });
 
@@ -128,7 +130,9 @@ describe('AuthService', () => {
       await expect(
         service.adminCreateUser('a@b.com', 'Tutors', 'contact-1'),
       ).resolves.toEqual(user);
-      expect(cognitoMock.commandCalls(AdminAddUserToGroupCommand)).toHaveLength(1);
+      expect(cognitoMock.commandCalls(AdminAddUserToGroupCommand)).toHaveLength(
+        1,
+      );
     });
 
     it('returns a failure message on error', async () => {
@@ -168,10 +172,19 @@ describe('AuthService', () => {
 
     it.each([
       ['NotAuthorizedException', 'Current password is incorrect.'],
-      ['InvalidPasswordException', 'New password does not meet the requirements.'],
+      [
+        'InvalidPasswordException',
+        'New password does not meet the requirements.',
+      ],
       ['LimitExceededException', 'Too many attempts, please try again later.'],
-      ['CodeMismatchException', 'Invalid or expired code. Please request a new one.'],
-      ['ExpiredCodeException', 'Invalid or expired code. Please request a new one.'],
+      [
+        'CodeMismatchException',
+        'Invalid or expired code. Please request a new one.',
+      ],
+      [
+        'ExpiredCodeException',
+        'Invalid or expired code. Please request a new one.',
+      ],
       [
         'UserNotFoundException',
         'If an account exists for that email, a reset code has been sent.',
@@ -205,7 +218,9 @@ describe('AuthService', () => {
     });
 
     it('returns a friendly error on failure', async () => {
-      cognitoMock.on(ForgotPasswordCommand).rejects(named('LimitExceededException'));
+      cognitoMock
+        .on(ForgotPasswordCommand)
+        .rejects(named('LimitExceededException'));
       await expect(service.forgotPassword('a@b.com')).resolves.toEqual({
         message: 'Too many attempts, please try again later.',
         success: false,

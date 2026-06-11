@@ -90,7 +90,9 @@ describe('NotesService', () => {
 
     it('rejects when save fails', async () => {
       Model.__save.mockRejectedValue(new Error('save boom'));
-      await expect(service.createNote(sampleNote())).rejects.toThrow('save boom');
+      await expect(service.createNote(sampleNote())).rejects.toThrow(
+        'save boom',
+      );
     });
   });
 

@@ -204,7 +204,8 @@ export class AuthService {
     try {
       await this.client.send(command);
       return {
-        message: 'If an account exists for that email, a reset code has been sent.',
+        message:
+          'If an account exists for that email, a reset code has been sent.',
         success: true,
       };
     } catch (error) {

@@ -81,13 +81,29 @@ describe('SessionsController', () => {
     });
 
     it('admin + tutor & student -> getSessions', async () => {
-      await controller.getSessions(reqAs(admin), 'tutor@example.com', 'stu-1', '');
-      expect(service.getSessions).toHaveBeenCalledWith('tutor@example.com', 'stu-1');
+      await controller.getSessions(
+        reqAs(admin),
+        'tutor@example.com',
+        'stu-1',
+        '',
+      );
+      expect(service.getSessions).toHaveBeenCalledWith(
+        'tutor@example.com',
+        'stu-1',
+      );
     });
 
     it('owning tutor + tutor & student -> getSessions', async () => {
-      await controller.getSessions(reqAs(tutor), 'tutor@example.com', 'stu-1', '');
-      expect(service.getSessions).toHaveBeenCalledWith('tutor@example.com', 'stu-1');
+      await controller.getSessions(
+        reqAs(tutor),
+        'tutor@example.com',
+        'stu-1',
+        '',
+      );
+      expect(service.getSessions).toHaveBeenCalledWith(
+        'tutor@example.com',
+        'stu-1',
+      );
     });
 
     it('tutor querying another tutor + student -> unauthorized', async () => {
@@ -98,12 +114,16 @@ describe('SessionsController', () => {
 
     it('admin + tutor only -> getSessionsByTutor', async () => {
       await controller.getSessions(reqAs(admin), 'tutor@example.com', '', '');
-      expect(service.getSessionsByTutor).toHaveBeenCalledWith('tutor@example.com');
+      expect(service.getSessionsByTutor).toHaveBeenCalledWith(
+        'tutor@example.com',
+      );
     });
 
     it('owning tutor + tutor only -> getSessionsByTutor', async () => {
       await controller.getSessions(reqAs(tutor), 'tutor@example.com', '', '');
-      expect(service.getSessionsByTutor).toHaveBeenCalledWith('tutor@example.com');
+      expect(service.getSessionsByTutor).toHaveBeenCalledWith(
+        'tutor@example.com',
+      );
     });
 
     it('tutor querying another tutor -> unauthorized', async () => {
@@ -159,18 +179,27 @@ describe('SessionsController', () => {
     });
 
     it('admin updates any session', async () => {
-      await controller.updateSession(reqAs(admin), session({ tutor_id: 'other@example.com' }));
+      await controller.updateSession(
+        reqAs(admin),
+        session({ tutor_id: 'other@example.com' }),
+      );
       expect(service.updateSession).toHaveBeenCalled();
     });
 
     it('owning tutor updates their own session', async () => {
-      await controller.updateSession(reqAs(tutor), session({ tutor_id: 'tutor@example.com' }));
+      await controller.updateSession(
+        reqAs(tutor),
+        session({ tutor_id: 'tutor@example.com' }),
+      );
       expect(service.updateSession).toHaveBeenCalled();
     });
 
     it('tutor cannot update another tutor session', async () => {
       await expect(
-        controller.updateSession(reqAs(tutor), session({ tutor_id: 'other@example.com' })),
+        controller.updateSession(
+          reqAs(tutor),
+          session({ tutor_id: 'other@example.com' }),
+        ),
       ).rejects.toThrow('Unauthorized');
     });
 

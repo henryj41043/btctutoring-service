@@ -57,7 +57,9 @@ describe('NotesController', () => {
 
     it('admin + author -> getNotesByAuthor', async () => {
       await controller.getNotes(reqAs(admin), '', 'tutor@example.com', '');
-      expect(service.getNotesByAuthor).toHaveBeenCalledWith('tutor@example.com');
+      expect(service.getNotesByAuthor).toHaveBeenCalledWith(
+        'tutor@example.com',
+      );
     });
 
     it('admin + recipient -> getNotesByRecipient', async () => {

@@ -62,7 +62,9 @@ describe('StudentsController', () => {
 
     it('admin + tutor -> getStudentsByTutor', async () => {
       await controller.getStudents(reqAs(admin), '', '', 'tutor@example.com');
-      expect(service.getStudentsByTutor).toHaveBeenCalledWith('tutor@example.com');
+      expect(service.getStudentsByTutor).toHaveBeenCalledWith(
+        'tutor@example.com',
+      );
     });
 
     it('admin + no params -> getStudents', async () => {

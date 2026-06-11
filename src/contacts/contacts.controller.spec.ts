@@ -89,7 +89,10 @@ describe('ContactsController', () => {
 
   describe('createContact', () => {
     it('admin creates a contact', async () => {
-      service.createContact.mockResolvedValue({ id: 'x', message: 'ok' } as never);
+      service.createContact.mockResolvedValue({
+        id: 'x',
+        message: 'ok',
+      } as never);
       await controller.createContact(reqAs(admin), contact);
       expect(service.createContact).toHaveBeenCalledWith(contact);
     });
@@ -132,7 +135,10 @@ describe('ContactsController', () => {
 
   describe('deleteContact', () => {
     it('admin deletes a contact', async () => {
-      service.deleteContact.mockResolvedValue({ id: 'contact-1', message: 'ok' } as never);
+      service.deleteContact.mockResolvedValue({
+        id: 'contact-1',
+        message: 'ok',
+      } as never);
       await controller.deleteContact(reqAs(admin), 'contact-1');
       expect(service.deleteContact).toHaveBeenCalledWith('contact-1');
     });

@@ -19,7 +19,9 @@ process.env.COGNITO_CLIENT_ID = 'client-1';
 import { JwtStrategy } from './jwt.strategy';
 
 const reqWithIdToken = (idToken?: string): express.Request =>
-  ({ headers: idToken ? { 'x-id-token': idToken } : {} }) as unknown as express.Request;
+  ({
+    headers: idToken ? { 'x-id-token': idToken } : {},
+  }) as unknown as express.Request;
 
 const accessPayload = (overrides: Record<string, unknown> = {}): JwtPayload =>
   ({
@@ -47,7 +49,10 @@ describe('JwtStrategy', () => {
       'custom:contact_id': 'contact-1',
     });
 
-    const user = await strategy.validate(reqWithIdToken('id-token'), accessPayload());
+    const user = await strategy.validate(
+      reqWithIdToken('id-token'),
+      accessPayload(),
+    );
 
     expect(mockVerify).toHaveBeenCalledWith('id-token');
     expect(user).toEqual({

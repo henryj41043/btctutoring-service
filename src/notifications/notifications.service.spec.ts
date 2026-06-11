@@ -127,7 +127,9 @@ describe('NotificationsService', () => {
   it('continues when sending for one tutor throws', async () => {
     sessionsService.getAllSessions.mockResolvedValue([stale()] as never);
     contactsService.getContact.mockRejectedValue(new Error('lookup failed'));
-    await expect(service.sendPendingSessionReminders()).resolves.toBeUndefined();
+    await expect(
+      service.sendPendingSessionReminders(),
+    ).resolves.toBeUndefined();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
   });
 
