@@ -25,12 +25,10 @@ export class AuthService {
   private clientId = process.env.COGNITO_CLIENT_ID!;
   private clientSecret = process.env.COGNITO_CLIENT_SECRET!;
   private userPoolId = process.env.COGNITO_USER_POOL_ID!;
+  // Uses the default AWS credential provider chain — the ECS task role in
+  // production — instead of static IAM-user keys passed as env vars.
   private adminClient = new CognitoIdentityProviderClient({
     region: 'us-east-1',
-    credentials: {
-      accessKeyId: `${process.env.AWS_ACCESS_KEY_ID}`,
-      secretAccessKey: `${process.env.AWS_SECRET_ACCESS_KEY}`,
-    },
   });
 
   private getSecretHash(username: string): string {
