@@ -162,28 +162,4 @@ describe('ContactsService', () => {
       );
     });
   });
-
-  describe('migrateBiweeklyBillingCycle', () => {
-    it('updates every stale biweekly contact to semi_monthly', async () => {
-      scanResolves(Model, [{ id: 'c-1' }, { id: 'c-2' }]);
-      Model.update.mockResolvedValue(undefined);
-      const result = await service.migrateBiweeklyBillingCycle();
-      expect(Model.scan).toHaveBeenCalledWith({
-        billing_cycle: { eq: 'biweekly' },
-      });
-      expect(Model.update).toHaveBeenCalledTimes(2);
-      expect(Model.update).toHaveBeenCalledWith(
-        { id: 'c-1' },
-        { billing_cycle: 'semi_monthly' },
-      );
-      expect(result.migrated).toBe(2);
-    });
-
-    it('rejects when the scan fails', async () => {
-      scanRejects(Model, new Error('scan boom'));
-      await expect(service.migrateBiweeklyBillingCycle()).rejects.toThrow(
-        'scan boom',
-      );
-    });
-  });
 });

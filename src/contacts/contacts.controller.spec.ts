@@ -34,7 +34,6 @@ describe('ContactsController', () => {
       createContact: jest.fn(),
       updateContact: jest.fn(),
       deleteContact: jest.fn(),
-      migrateBiweeklyBillingCycle: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ContactsController],
@@ -154,24 +153,6 @@ describe('ContactsController', () => {
       const noGroups = { ...tutor, groups: undefined } as unknown as User;
       await expect(
         controller.deleteContact(reqAs(noGroups), 'contact-1'),
-      ).rejects.toThrow('Unauthorized');
-    });
-  });
-
-  describe('migrateBillingCycle', () => {
-    it('admin runs the migration', async () => {
-      service.migrateBiweeklyBillingCycle.mockResolvedValue({
-        migrated: 3,
-        message: 'ok',
-      } as never);
-      const result = await controller.migrateBillingCycle(reqAs(admin));
-      expect(service.migrateBiweeklyBillingCycle).toHaveBeenCalled();
-      expect(result).toEqual({ migrated: 3, message: 'ok' });
-    });
-
-    it('non-admin is unauthorized', async () => {
-      await expect(
-        controller.migrateBillingCycle(reqAs(tutor)),
       ).rejects.toThrow('Unauthorized');
     });
   });
