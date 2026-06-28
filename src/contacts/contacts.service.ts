@@ -41,16 +41,9 @@ export class ContactsService {
       phone_number: contact.phone_number,
       service: contact.service,
       status: contact.status,
-      monthly_charge: contact.monthly_charge,
-      charge_per_billing_cycle: contact.charge_per_billing_cycle,
-      amount_to_be_paid_this_month: contact.amount_to_be_paid_this_month,
       billing_cycle: contact.billing_cycle,
       cc_authorization_received: contact.cc_authorization_received,
       twenty_five_deducted: contact.twenty_five_deducted,
-      payment_one_received: contact.payment_one_received,
-      payment_two_received: contact.payment_two_received,
-      payment_three_received: contact.payment_three_received,
-      payment_four_received: contact.payment_four_received,
       special_circumstance: contact.special_circumstance,
       scholarship_state: contact.scholarship_state,
       invoice_Month: contact.invoice_Month,
@@ -111,16 +104,9 @@ export class ContactsService {
         phone_number: contact.phone_number,
         service: contact.service,
         status: contact.status,
-        monthly_charge: contact.monthly_charge,
-        charge_per_billing_cycle: contact.charge_per_billing_cycle,
-        amount_to_be_paid_this_month: contact.amount_to_be_paid_this_month,
         billing_cycle: contact.billing_cycle,
         cc_authorization_received: contact.cc_authorization_received,
         twenty_five_deducted: contact.twenty_five_deducted,
-        payment_one_received: contact.payment_one_received,
-        payment_two_received: contact.payment_two_received,
-        payment_three_received: contact.payment_three_received,
-        payment_four_received: contact.payment_four_received,
         special_circumstance: contact.special_circumstance,
         scholarship_state: contact.scholarship_state,
         invoice_Month: contact.invoice_Month,
@@ -158,6 +144,33 @@ export class ContactsService {
     )
       .then((updatedContact) => {
         return updatedContact;
+      })
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /**
+   * One-off migration: rename the legacy 'biweekly' billing cycle to the new
+   * 'semi_monthly' value (1st & 15th). Idempotent — only touches stale records.
+   */
+  async migrateBiweeklyBillingCycle() {
+    return ContactsModel.scan({ billing_cycle: { eq: 'biweekly' } })
+      .exec()
+      .then(async (stale) => {
+        await Promise.all(
+          (stale as unknown as Array<{ id: string }>).map((c) =>
+            ContactsModel.update(
+              { id: c.id },
+              { billing_cycle: 'semi_monthly' },
+            ),
+          ),
+        );
+        return {
+          migrated: stale.length,
+          message: `Updated ${stale.length} contact(s) from biweekly to semi_monthly.`,
+        };
       })
       .catch((error: Error) => {
         Logger.error(error.message, error);

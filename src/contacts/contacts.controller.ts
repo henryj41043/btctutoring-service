@@ -78,6 +78,19 @@ export class ContactsController {
     }
   }
 
+  @Post('migrate/billing-cycle')
+  @UseGuards(AuthGuard('jwt'))
+  async migrateBillingCycle(@Request() req: express.Request): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.contactsService.migrateBiweeklyBillingCycle();
+    } else {
+      Logger.error('User not authorized to run the billing-cycle migration');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
   async deleteContact(

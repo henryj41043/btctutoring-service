@@ -109,6 +109,15 @@ describe('StudentsService', () => {
       expect(result).toBe(updated);
     });
 
+    it('persists the scholarship flag', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(sampleStudent({ scholarship: true }));
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        expect.objectContaining({ scholarship: true }),
+      );
+    });
+
     it('rejects when update fails', async () => {
       Model.update.mockRejectedValue(new Error('update boom'));
       await expect(service.updateStudent(sampleStudent())).rejects.toThrow(
