@@ -151,33 +151,6 @@ export class ContactsService {
       });
   }
 
-  /**
-   * One-off migration: rename the legacy 'biweekly' billing cycle to the new
-   * 'semi_monthly' value (1st & 15th). Idempotent — only touches stale records.
-   */
-  async migrateBiweeklyBillingCycle() {
-    return ContactsModel.scan({ billing_cycle: { eq: 'biweekly' } })
-      .exec()
-      .then(async (stale) => {
-        await Promise.all(
-          (stale as unknown as Array<{ id: string }>).map((c) =>
-            ContactsModel.update(
-              { id: c.id },
-              { billing_cycle: 'semi_monthly' },
-            ),
-          ),
-        );
-        return {
-          migrated: stale.length,
-          message: `Updated ${stale.length} contact(s) from biweekly to semi_monthly.`,
-        };
-      })
-      .catch((error: Error) => {
-        Logger.error(error.message, error);
-        return Promise.reject(error);
-      });
-  }
-
   async deleteContact(id: string) {
     return ContactsModel.delete({
       id: id,
