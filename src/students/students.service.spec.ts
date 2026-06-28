@@ -95,6 +95,37 @@ describe('StudentsService', () => {
         'save boom',
       );
     });
+
+    it('strips null/invalid optional fields before saving (regression: schedule [null] 500)', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      await service.createStudent(
+        sampleStudent({
+          schedule: [null] as never,
+          package_start_date: null as never,
+          custom_monthly_cost: null as never,
+          auto_renew: null as never,
+        }),
+      );
+      const attrs = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(attrs).not.toHaveProperty('schedule');
+      expect(attrs).not.toHaveProperty('package_start_date');
+      expect(attrs).not.toHaveProperty('custom_monthly_cost');
+      expect(attrs).not.toHaveProperty('auto_renew');
+      expect(attrs.contact_id).toBe('contact-1');
+    });
+
+    it('keeps a valid schedule', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      await service.createStudent(
+        sampleStudent({
+          schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        }),
+      );
+      const attrs = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(attrs.schedule).toHaveLength(1);
+    });
   });
 
   describe('updateStudent', () => {
@@ -107,6 +138,21 @@ describe('StudentsService', () => {
         expect.objectContaining({ name: 'Pat' }),
       );
       expect(result).toBe(updated);
+    });
+
+    it('strips null optional fields on update (regression)', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          schedule: null as never,
+          package_start_date: null as never,
+          custom_session_length_min: null as never,
+        }),
+      );
+      const upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd).not.toHaveProperty('schedule');
+      expect(upd).not.toHaveProperty('package_start_date');
+      expect(upd).not.toHaveProperty('custom_session_length_min');
     });
 
     it('persists the scholarship flag', async () => {
