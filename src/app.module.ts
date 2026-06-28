@@ -12,6 +12,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { StudentsModule } from './students/students.module';
 import { NotesModule } from './notes/notes.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     StudentsModule,
     NotesModule,
     NotificationsModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],
