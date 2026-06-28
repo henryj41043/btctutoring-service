@@ -160,8 +160,11 @@ export class ContactsService {
       .exec()
       .then(async (stale) => {
         await Promise.all(
-          stale.map((c) =>
-            ContactsModel.update({ id: c.id }, { billing_cycle: 'semi_monthly' }),
+          (stale as unknown as Array<{ id: string }>).map((c) =>
+            ContactsModel.update(
+              { id: c.id },
+              { billing_cycle: 'semi_monthly' },
+            ),
           ),
         );
         return {

@@ -7,7 +7,10 @@ describe('AutoRenewService', () => {
   const students = { getStudents: jest.fn() };
   const sessions = { createSessions: jest.fn() };
   const contacts = { getContacts: jest.fn() };
-  const billing = { acquireLock: jest.fn(), createBillingRecordIfAbsent: jest.fn() };
+  const billing = {
+    acquireLock: jest.fn(),
+    createBillingRecordIfAbsent: jest.fn(),
+  };
 
   const student = (over: Partial<Student> = {}): Student =>
     ({
@@ -27,7 +30,12 @@ describe('AutoRenewService', () => {
     }) as Student;
 
   const parent = (over: Partial<Contact> = {}): Contact =>
-    ({ id: 'c-1', first_name: 'Casey', billing_cycle: 'monthly', ...over }) as Contact;
+    ({
+      id: 'c-1',
+      first_name: 'Casey',
+      billing_cycle: 'monthly',
+      ...over,
+    }) as Contact;
   const tutor = (): Contact => ({ id: 't-1', first_name: 'Tess' }) as Contact;
 
   beforeEach(() => {
@@ -40,7 +48,10 @@ describe('AutoRenewService', () => {
       billing as any,
     );
     billing.acquireLock.mockResolvedValue(true);
-    billing.createBillingRecordIfAbsent.mockResolvedValue({ id: 'x', created: true });
+    billing.createBillingRecordIfAbsent.mockResolvedValue({
+      id: 'x',
+      created: true,
+    });
     sessions.createSessions.mockResolvedValue({});
     students.getStudents.mockResolvedValue([student()]);
     contacts.getContacts.mockResolvedValue([parent(), tutor()]);
@@ -63,7 +74,9 @@ describe('AutoRenewService', () => {
     const created = sessions.createSessions.mock.calls[0][0];
     expect(created).toHaveLength(9);
     expect(created[0].tutor_name).toBe('Tess');
-    expect(created.every((s: any) => s.series_id === created[0].series_id)).toBe(true);
+    expect(
+      created.every((s: any) => s.series_id === created[0].series_id),
+    ).toBe(true);
     expect(result.sessionsCreated).toBe(9);
   });
 
@@ -83,15 +96,22 @@ describe('AutoRenewService', () => {
   });
 
   it('splits semi-monthly contacts into two records', async () => {
-    contacts.getContacts.mockResolvedValue([parent({ billing_cycle: 'semi_monthly' }), tutor()]);
+    contacts.getContacts.mockResolvedValue([
+      parent({ billing_cycle: 'semi_monthly' }),
+      tutor(),
+    ]);
     await service.runAutoRenew(july);
     expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledTimes(2);
-    const periods = billing.createBillingRecordIfAbsent.mock.calls.map((c) => c[0].period_start);
+    const periods = billing.createBillingRecordIfAbsent.mock.calls.map(
+      (c) => c[0].period_start,
+    );
     expect(periods).toEqual(['2026-07-01', '2026-07-15']);
   });
 
   it('does not double-renew a student who started in the current month', async () => {
-    students.getStudents.mockResolvedValue([student({ package_start_date: '2026-07-10T00:00:00' })]);
+    students.getStudents.mockResolvedValue([
+      student({ package_start_date: '2026-07-10T00:00:00' }),
+    ]);
     const result = await service.runAutoRenew(july);
     expect(sessions.createSessions).not.toHaveBeenCalled();
     expect(result.sessionsCreated).toBe(0);
@@ -105,8 +125,16 @@ describe('AutoRenewService', () => {
   });
 
   it('does not count a billing record that already existed', async () => {
-    billing.createBillingRecordIfAbsent.mockResolvedValue({ id: 'x', created: false });
+    billing.createBillingRecordIfAbsent.mockResolvedValue({
+      id: 'x',
+      created: false,
+    });
     const result = await service.runAutoRenew(july);
     expect(result.billingRecords).toBe(0);
+  });
+
+  it('the @Cron handler runs the renewal for the current month', async () => {
+    await service.handleMonthlyRenewal();
+    expect(billing.acquireLock).toHaveBeenCalled();
   });
 });

@@ -18,10 +18,17 @@ const WEEKDAY_BY_JS_DAY = [
 ];
 
 /** Counts the schedule slots that fall before a mid-month start date. */
-export function countMissedSlots(schedule: ScheduleSlot[], startDate: Date): number {
+export function countMissedSlots(
+  schedule: ScheduleSlot[],
+  startDate: Date,
+): number {
   if (!schedule || schedule.length === 0) return 0;
   const weekdaysScheduled = schedule.map((s) => s.weekday);
-  const firstOfMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const firstOfMonth = new Date(
+    startDate.getFullYear(),
+    startDate.getMonth(),
+    1,
+  );
   const start = new Date(
     startDate.getFullYear(),
     startDate.getMonth(),
@@ -39,7 +46,10 @@ export function countMissedSlots(schedule: ScheduleSlot[], startDate: Date): num
 }
 
 /** The prorated cost of a partial first month; never below zero. */
-export function proratedFirstMonthCost(def: PackageDef, missedSlots: number): number {
+export function proratedFirstMonthCost(
+  def: PackageDef,
+  missedSlots: number,
+): number {
   const reduction = round2(perSessionCost(def) * missedSlots);
   return Math.max(0, round2(def.monthlyCost - reduction));
 }

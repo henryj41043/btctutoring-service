@@ -54,16 +54,20 @@ export class AutoRenewService {
    * Rolls schedules + billing into the month containing `now`. Exposed (not just
    * the @Cron handler) so it can be unit-tested with a fixed clock.
    */
-  async runAutoRenew(
-    now: Date,
-  ): Promise<{ sessionsCreated: number; billingRecords: number; skipped: boolean }> {
+  async runAutoRenew(now: Date): Promise<{
+    sessionsCreated: number;
+    billingRecords: number;
+    skipped: boolean;
+  }> {
     const year = now.getFullYear();
     const month = now.getMonth();
     const lockId = `lock#auto-renew#${this.monthKey(year, month)}`;
 
     const acquired = await this.billing.acquireLock(lockId);
     if (!acquired) {
-      this.logger.log(`Auto-renew for ${this.monthKey(year, month)} already done; skipping.`);
+      this.logger.log(
+        `Auto-renew for ${this.monthKey(year, month)} already done; skipping.`,
+      );
       return { sessionsCreated: 0, billingRecords: 0, skipped: true };
     }
 
@@ -91,7 +95,12 @@ export class AutoRenewService {
     let sessionsCreated = 0;
     for (const student of renewable) {
       const tutor = contacts.find((c) => c.id === student.assigned_tutor_id);
-      const monthSessions = this.buildMonthSessions(student, tutor, year, month);
+      const monthSessions = this.buildMonthSessions(
+        student,
+        tutor,
+        year,
+        month,
+      );
       if (monthSessions.length > 0) {
         await this.sessions.createSessions(monthSessions);
         sessionsCreated += monthSessions.length;
@@ -104,18 +113,38 @@ export class AutoRenewService {
     for (const contactId of renewContactIds) {
       const contact = contacts.find((c) => c.id === contactId);
       if (!contact) continue;
-      const contactStudents = activeStudents.filter((s) => s.contact_id === contactId);
+      const contactStudents = activeStudents.filter(
+        (s) => s.contact_id === contactId,
+      );
       const total = round2(
-        contactStudents.reduce((sum, s) => sum + studentMonthlyCharge(s, year, month), 0),
+        contactStudents.reduce(
+          (sum, s) => sum + studentMonthlyCharge(s, year, month),
+          0,
+        ),
       );
       if (total <= 0) continue;
 
       if (this.isSemiMonthly(contact.billing_cycle)) {
         const [first, second] = semiMonthlySplit(total);
-        billingRecords += await this.createRecord(contactId, this.periodKey(year, month, 1), 'semi_monthly', first);
-        billingRecords += await this.createRecord(contactId, this.periodKey(year, month, 15), 'semi_monthly', second);
+        billingRecords += await this.createRecord(
+          contactId,
+          this.periodKey(year, month, 1),
+          'semi_monthly',
+          first,
+        );
+        billingRecords += await this.createRecord(
+          contactId,
+          this.periodKey(year, month, 15),
+          'semi_monthly',
+          second,
+        );
       } else {
-        billingRecords += await this.createRecord(contactId, this.periodKey(year, month, 1), 'monthly', total);
+        billingRecords += await this.createRecord(
+          contactId,
+          this.periodKey(year, month, 1),
+          'monthly',
+          total,
+        );
       }
     }
 

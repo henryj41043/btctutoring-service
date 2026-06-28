@@ -11,18 +11,65 @@ export interface PackageDef {
   sessionLengthMin: number;
 }
 
-export const PACKAGE_CONFIG: Record<Exclude<Package, Package.CUSTOM>, PackageDef> = {
-  [Package.THRIVE]: { monthlyCost: 181, sessionsPerWeek: 1, sessionLengthMin: 30 },
-  [Package.EXCEL]: { monthlyCost: 273, sessionsPerWeek: 1, sessionLengthMin: 45 },
-  [Package.SUCCEED]: { monthlyCost: 362, sessionsPerWeek: 2, sessionLengthMin: 30 },
-  [Package.ACHIEVE]: { monthlyCost: 546, sessionsPerWeek: 3, sessionLengthMin: 30 },
-  [Package.VICTORY]: { monthlyCost: 546, sessionsPerWeek: 2, sessionLengthMin: 45 },
-  [Package.EMPOWER]: { monthlyCost: 819, sessionsPerWeek: 3, sessionLengthMin: 45 },
-  [Package.DETERMINATION]: { monthlyCost: 728, sessionsPerWeek: 2, sessionLengthMin: 60 },
-  [Package.TRIUMPH]: { monthlyCost: 728, sessionsPerWeek: 4, sessionLengthMin: 30 },
-  [Package.POWER_UP]: { monthlyCost: 1092, sessionsPerWeek: 3, sessionLengthMin: 60 },
-  [Package.CONQUEST]: { monthlyCost: 1092, sessionsPerWeek: 4, sessionLengthMin: 45 },
-  [Package.SUMMIT]: { monthlyCost: 1456, sessionsPerWeek: 4, sessionLengthMin: 60 },
+export const PACKAGE_CONFIG: Record<
+  Exclude<Package, Package.CUSTOM>,
+  PackageDef
+> = {
+  [Package.THRIVE]: {
+    monthlyCost: 181,
+    sessionsPerWeek: 1,
+    sessionLengthMin: 30,
+  },
+  [Package.EXCEL]: {
+    monthlyCost: 273,
+    sessionsPerWeek: 1,
+    sessionLengthMin: 45,
+  },
+  [Package.SUCCEED]: {
+    monthlyCost: 362,
+    sessionsPerWeek: 2,
+    sessionLengthMin: 30,
+  },
+  [Package.ACHIEVE]: {
+    monthlyCost: 546,
+    sessionsPerWeek: 3,
+    sessionLengthMin: 30,
+  },
+  [Package.VICTORY]: {
+    monthlyCost: 546,
+    sessionsPerWeek: 2,
+    sessionLengthMin: 45,
+  },
+  [Package.EMPOWER]: {
+    monthlyCost: 819,
+    sessionsPerWeek: 3,
+    sessionLengthMin: 45,
+  },
+  [Package.DETERMINATION]: {
+    monthlyCost: 728,
+    sessionsPerWeek: 2,
+    sessionLengthMin: 60,
+  },
+  [Package.TRIUMPH]: {
+    monthlyCost: 728,
+    sessionsPerWeek: 4,
+    sessionLengthMin: 30,
+  },
+  [Package.POWER_UP]: {
+    monthlyCost: 1092,
+    sessionsPerWeek: 3,
+    sessionLengthMin: 60,
+  },
+  [Package.CONQUEST]: {
+    monthlyCost: 1092,
+    sessionsPerWeek: 4,
+    sessionLengthMin: 45,
+  },
+  [Package.SUMMIT]: {
+    monthlyCost: 1456,
+    sessionsPerWeek: 4,
+    sessionLengthMin: 60,
+  },
 };
 
 export function round2(value: number): number {
@@ -34,7 +81,7 @@ export function resolvePackageDef(
   override?: Partial<PackageDef> | null,
 ): PackageDef | null {
   if (!pkg) return null;
-  if (pkg === Package.CUSTOM) {
+  if (pkg === (Package.CUSTOM as string)) {
     if (
       override &&
       override.monthlyCost != null &&

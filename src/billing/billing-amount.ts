@@ -29,7 +29,10 @@ export function studentMonthlyCharge(
   const start = new Date(student.package_start_date);
   if (start > monthEnd) return 0;
   if (start >= monthStart && start <= monthEnd && start.getDate() > 1) {
-    return proratedFirstMonthCost(def, countMissedSlots(student.schedule ?? [], start));
+    return proratedFirstMonthCost(
+      def,
+      countMissedSlots(student.schedule ?? [], start),
+    );
   }
   return def.monthlyCost;
 }

@@ -40,9 +40,10 @@ export class BillingService {
   }
 
   /** True if a dynamoose error is the conditional "item already exists" failure. */
-  private static isAlreadyExists(error: any): boolean {
-    const name: string = error?.name ?? '';
-    const message: string = error?.message ?? '';
+  private static isAlreadyExists(error: unknown): boolean {
+    const e = error as { name?: string; message?: string };
+    const name: string = e?.name ?? '';
+    const message: string = e?.message ?? '';
     return (
       name === 'ConditionalCheckFailedException' ||
       /already exists|ConditionalCheckFailed/i.test(message)
