@@ -5,6 +5,43 @@ import { randomUUID } from 'crypto';
 
 @Injectable()
 export class StudentsService {
+  /**
+   * Builds the persistable attributes for a student, dropping null/undefined
+   * values and any malformed schedule entries. dynamoose rejects `null` for
+   * every typed field (string/number/boolean/array), and the client sends null
+   * for the optional schedule/billing fields when saving a newly-added student,
+   * so those must be stripped rather than written.
+   */
+  private buildStudentAttributes(student: Student): Record<string, unknown> {
+    const schedule = Array.isArray(student.schedule)
+      ? student.schedule.filter((s) => s && typeof s === 'object')
+      : undefined;
+
+    const candidate: Record<string, unknown> = {
+      contact_id: student.contact_id,
+      name: student.name,
+      birthday: student.birthday,
+      status: student.status,
+      assigned_tutor_id: student.assigned_tutor_id,
+      package: student.package,
+      scholarship: student.scholarship,
+      schedule: schedule && schedule.length > 0 ? schedule : undefined,
+      package_start_date: student.package_start_date,
+      auto_renew: student.auto_renew,
+      custom_monthly_cost: student.custom_monthly_cost,
+      custom_sessions_per_week: student.custom_sessions_per_week,
+      custom_session_length_min: student.custom_session_length_min,
+      make_up_minutes: student.make_up_minutes,
+    };
+
+    for (const key of Object.keys(candidate)) {
+      if (candidate[key] === null || candidate[key] === undefined) {
+        delete candidate[key];
+      }
+    }
+    return candidate;
+  }
+
   async getStudent(id: string) {
     return StudentsModel.scan({
       id: { eq: id },
@@ -63,20 +100,7 @@ export class StudentsService {
     const newUuid: string = randomUUID();
     const newStudent = new StudentsModel({
       id: newUuid,
-      contact_id: student.contact_id,
-      name: student.name,
-      birthday: student.birthday,
-      status: student.status,
-      assigned_tutor_id: student.assigned_tutor_id,
-      package: student.package,
-      scholarship: student.scholarship,
-      schedule: student.schedule,
-      package_start_date: student.package_start_date,
-      auto_renew: student.auto_renew,
-      custom_monthly_cost: student.custom_monthly_cost,
-      custom_sessions_per_week: student.custom_sessions_per_week,
-      custom_session_length_min: student.custom_session_length_min,
-      make_up_minutes: student.make_up_minutes,
+      ...this.buildStudentAttributes(student),
     });
     return newStudent
       .save()
@@ -97,22 +121,7 @@ export class StudentsService {
       {
         id: student.id,
       },
-      {
-        contact_id: student.contact_id,
-        name: student.name,
-        birthday: student.birthday,
-        status: student.status,
-        assigned_tutor_id: student.assigned_tutor_id,
-        package: student.package,
-        scholarship: student.scholarship,
-        schedule: student.schedule,
-        package_start_date: student.package_start_date,
-        auto_renew: student.auto_renew,
-        custom_monthly_cost: student.custom_monthly_cost,
-        custom_sessions_per_week: student.custom_sessions_per_week,
-        custom_session_length_min: student.custom_session_length_min,
-        make_up_minutes: student.make_up_minutes,
-      },
+      this.buildStudentAttributes(student),
     )
       .then((updatedStudent) => {
         return updatedStudent;
