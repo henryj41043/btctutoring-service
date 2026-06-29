@@ -42,6 +42,11 @@ export class StudentsService {
     return candidate;
   }
 
+  /** True when the client sent an explicitly empty schedule, signalling a clear. */
+  private isScheduleCleared(student: Student): boolean {
+    return Array.isArray(student.schedule) && student.schedule.length === 0;
+  }
+
   async getStudent(id: string) {
     return StudentsModel.scan({
       id: { eq: id },
@@ -117,11 +122,19 @@ export class StudentsService {
   }
 
   async updateStudent(student: Student) {
+    const attributes = this.buildStudentAttributes(student);
+    // An explicitly empty schedule means "clear the recurring schedule". dynamoose
+    // only $SETs provided keys (and buildStudentAttributes drops empty arrays), so
+    // an empty array would otherwise leave the old schedule in place — issue an
+    // explicit $REMOVE to actually drop it.
+    const update = this.isScheduleCleared(student)
+      ? { $SET: attributes, $REMOVE: ['schedule'] }
+      : attributes;
     return StudentsModel.update(
       {
         id: student.id,
       },
-      this.buildStudentAttributes(student),
+      update,
     )
       .then((updatedStudent) => {
         return updatedStudent;

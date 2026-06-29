@@ -155,6 +155,17 @@ describe('StudentsService', () => {
       expect(upd).not.toHaveProperty('custom_session_length_min');
     });
 
+    it('issues a $REMOVE to clear an explicitly emptied schedule', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(sampleStudent({ schedule: [] }));
+      const update = Model.update.mock.calls.at(-1)![1] as {
+        $SET?: Record<string, unknown>;
+        $REMOVE?: string[];
+      };
+      expect(update.$REMOVE).toEqual(['schedule']);
+      expect(update.$SET).not.toHaveProperty('schedule');
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
