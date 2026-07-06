@@ -67,6 +67,28 @@ describe('ContactsService', () => {
     });
   });
 
+  describe('getContactsSummary', () => {
+    it('projects only the table columns and paginates fully', async () => {
+      const lean = [{ id: 'c-1', first_name: 'Ada', email: 'ada@example.com' }];
+      const chain = scanResolves(Model, lean);
+      await expect(service.getContactsSummary()).resolves.toBe(lean);
+      expect(chain.attributes).toHaveBeenCalledWith([
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'phone_number',
+        'service',
+      ]);
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getContactsSummary()).rejects.toThrow('scan boom');
+    });
+  });
+
   describe('getStaffContacts', () => {
     it('scans for Hiring staff only and paginates fully', async () => {
       const staff = [sampleContact({ service: 'Hiring', status: 'Staff' })];

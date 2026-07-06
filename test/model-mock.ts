@@ -42,6 +42,7 @@ export function makeModelMock(): ModelMock {
  */
 export interface ScanChainMock {
   where: jest.Mock;
+  attributes: jest.Mock;
   between: jest.Mock;
   ge: jest.Mock;
   le: jest.Mock;
@@ -53,6 +54,7 @@ export interface ScanChainMock {
 function makeScanChain(exec: jest.Mock): ScanChainMock {
   const chain = { exec } as ScanChainMock;
   chain.where = jest.fn(() => chain);
+  chain.attributes = jest.fn(() => chain);
   chain.between = jest.fn(() => chain);
   chain.ge = jest.fn(() => chain);
   chain.le = jest.fn(() => chain);
