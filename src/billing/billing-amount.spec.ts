@@ -46,7 +46,9 @@ describe('studentMonthlyCharge (service)', () => {
     ).toBe(0);
   });
 
-  it('prorates the first partial month', () => {
+  it('prorates the first partial month from the sessions received', () => {
+    // July 2026 Wednesdays: 1, 8, 15, 22, 29. Start Jul 15 → 3 remaining →
+    // perSession round(400*12/52,2)=92.31 → round(92.31*3,2)=276.93.
     const student = {
       package: Package.CUSTOM,
       custom_monthly_cost: 400,
@@ -57,6 +59,29 @@ describe('studentMonthlyCharge (service)', () => {
         { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:45' },
       ],
     } as Student;
-    expect(studentMonthlyCharge(student, 2026, 6)).toBe(215.38);
+    expect(studentMonthlyCharge(student, 2026, 6)).toBe(276.93);
+  });
+
+  it('charges one per-session cost when a single session remains (regression)', () => {
+    // Succeed $362 → 83.54/wk → 41.77/session. June 2026: starting Tue Jun 30
+    // (Tue/Thu schedule) leaves one session → $41.77, not $27.84.
+    const student = succeed({
+      package_start_date: '2026-06-30T00:00:00',
+      schedule: [
+        { weekday: 'TUESDAY', start_time: '10:00', end_time: '10:30' },
+        { weekday: 'THURSDAY', start_time: '10:00', end_time: '10:30' },
+      ] as Student['schedule'],
+    });
+    expect(studentMonthlyCharge(student, 2026, 5)).toBe(41.77);
+  });
+
+  it('falls back to full cost when a mid-month starter has no schedule', () => {
+    expect(
+      studentMonthlyCharge(
+        succeed({ package_start_date: '2026-07-31T00:00:00' }),
+        2026,
+        6,
+      ),
+    ).toBe(362);
   });
 });

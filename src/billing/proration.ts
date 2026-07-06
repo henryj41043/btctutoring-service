@@ -17,41 +17,50 @@ const WEEKDAY_BY_JS_DAY = [
   'SATURDAY',
 ];
 
-/** Counts the schedule slots that fall before a mid-month start date. */
-export function countMissedSlots(
+/**
+ * Counts the schedule slots the student actually receives in their partial
+ * first month: slots from the start date (inclusive) through month end.
+ */
+export function countRemainingSlots(
   schedule: ScheduleSlot[],
   startDate: Date,
 ): number {
   if (!schedule || schedule.length === 0) return 0;
   const weekdaysScheduled = schedule.map((s) => s.weekday);
-  const firstOfMonth = new Date(
-    startDate.getFullYear(),
-    startDate.getMonth(),
-    1,
-  );
   const start = new Date(
     startDate.getFullYear(),
     startDate.getMonth(),
     startDate.getDate(),
   );
+  const endOfMonth = new Date(
+    startDate.getFullYear(),
+    startDate.getMonth() + 1,
+    0,
+  );
 
-  let missed = 0;
-  const cursor = new Date(firstOfMonth);
-  while (cursor < start) {
+  let remaining = 0;
+  const cursor = new Date(start);
+  while (cursor <= endOfMonth) {
     const weekday = WEEKDAY_BY_JS_DAY[cursor.getDay()];
-    missed += weekdaysScheduled.filter((w) => w === weekday).length;
+    remaining += weekdaysScheduled.filter((w) => w === weekday).length;
     cursor.setDate(cursor.getDate() + 1);
   }
-  return missed;
+  return remaining;
 }
 
-/** The prorated cost of a partial first month; never below zero. */
+/**
+ * The prorated cost of a partial first month: per-session cost × the sessions
+ * received (remaining slots), capped at the flat monthly cost (a month can
+ * hold more weekly slots than the flat price covers).
+ */
 export function proratedFirstMonthCost(
   def: PackageDef,
-  missedSlots: number,
+  remainingSlots: number,
 ): number {
-  const reduction = round2(perSessionCost(def) * missedSlots);
-  return Math.max(0, round2(def.monthlyCost - reduction));
+  return Math.min(
+    def.monthlyCost,
+    round2(perSessionCost(def) * remainingSlots),
+  );
 }
 
 /** Splits a period total into two semi-monthly payments (the 2nd absorbs odd pennies). */

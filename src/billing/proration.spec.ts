@@ -1,5 +1,5 @@
 import {
-  countMissedSlots,
+  countRemainingSlots,
   proratedFirstMonthCost,
   semiMonthlySplit,
 } from './proration';
@@ -12,31 +12,41 @@ const slot = (weekday: string): ScheduleSlot =>
   ({ weekday, start_time: '15:00', end_time: '15:30' }) as ScheduleSlot;
 
 describe('proration (service)', () => {
-  it('counts missed slots before a mid-month start', () => {
-    expect(countMissedSlots([slot('WEDNESDAY')], new Date(2026, 6, 15))).toBe(
-      2,
-    );
-  });
-
-  it('counts across multiple weekday slots', () => {
+  it('counts remaining slots from a mid-month start through month end', () => {
+    // Wednesdays on/after the 15th: 15, 22, 29.
     expect(
-      countMissedSlots(
-        [slot('MONDAY'), slot('WEDNESDAY')],
-        new Date(2026, 6, 9),
-      ),
+      countRemainingSlots([slot('WEDNESDAY')], new Date(2026, 6, 15)),
     ).toBe(3);
   });
 
-  it('is zero on the 1st and for an empty schedule', () => {
-    expect(countMissedSlots([slot('WEDNESDAY')], new Date(2026, 6, 1))).toBe(0);
-    expect(countMissedSlots([], new Date(2026, 6, 15))).toBe(0);
+  it('counts across multiple weekday slots, including the start date', () => {
+    // On/after the 9th: Wednesdays 15,22,29 + Mondays 13,20,27.
+    expect(
+      countRemainingSlots(
+        [slot('MONDAY'), slot('WEDNESDAY')],
+        new Date(2026, 6, 9),
+      ),
+    ).toBe(6);
+    // Starting ON a scheduled Wednesday counts that day.
+    expect(
+      countRemainingSlots([slot('WEDNESDAY')], new Date(2026, 6, 29)),
+    ).toBe(1);
   });
 
-  it('prorates, charges full, and floors at zero', () => {
-    const succeed = PACKAGE_CONFIG[Package.SUCCEED];
-    expect(proratedFirstMonthCost(succeed, 2)).toBe(278.46);
-    expect(proratedFirstMonthCost(succeed, 0)).toBe(362);
-    expect(proratedFirstMonthCost(succeed, 1000)).toBe(0);
+  it('is zero when no scheduled days remain and for an empty schedule', () => {
+    expect(
+      countRemainingSlots([slot('WEDNESDAY')], new Date(2026, 6, 30)),
+    ).toBe(0);
+    expect(countRemainingSlots([], new Date(2026, 6, 15))).toBe(0);
+  });
+
+  it('charges per-session cost × remaining sessions, capped at the monthly cost', () => {
+    const succeed = PACKAGE_CONFIG[Package.SUCCEED]; // $362, perSession $41.77
+    expect(proratedFirstMonthCost(succeed, 1)).toBe(41.77);
+    expect(proratedFirstMonthCost(succeed, 2)).toBe(83.54);
+    expect(proratedFirstMonthCost(succeed, 0)).toBe(0);
+    // 9 × 41.77 = 375.93 > 362 → capped at the flat monthly price.
+    expect(proratedFirstMonthCost(succeed, 9)).toBe(362);
   });
 
   it('splits semi-monthly totals', () => {
