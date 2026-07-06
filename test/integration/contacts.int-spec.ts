@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import request from 'supertest';
 import { ContactsController } from '../../src/contacts/contacts.controller';
 import { ContactsService } from '../../src/contacts/contacts.service';
@@ -18,7 +19,13 @@ describe('Contacts (integration)', () => {
   beforeAll(async () => {
     app = await bootIntegrationApp({
       controllers: [ContactsController],
-      providers: [ContactsService],
+      providers: [
+        ContactsService,
+        {
+          provide: DynamoDBDocumentClient,
+          useValue: { send: jest.fn().mockResolvedValue({ Items: [] }) },
+        },
+      ],
     });
   });
 

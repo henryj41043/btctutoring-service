@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { ContactsService } from './contacts.service';
 import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
@@ -23,10 +24,15 @@ const sampleContact = (overrides: Partial<Contact> = {}): Contact =>
 
 describe('ContactsService', () => {
   let service: ContactsService;
+  const documentClient = { send: jest.fn() };
 
   beforeEach(async () => {
+    documentClient.send.mockReset();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ContactsService],
+      providers: [
+        ContactsService,
+        { provide: DynamoDBDocumentClient, useValue: documentClient },
+      ],
     }).compile();
     service = module.get<ContactsService>(ContactsService);
   });
@@ -68,23 +74,53 @@ describe('ContactsService', () => {
   });
 
   describe('getContactsSummary', () => {
-    it('projects only the table columns and paginates fully', async () => {
+    it('scans with the summary projection via the raw document client', async () => {
       const lean = [{ id: 'c-1', first_name: 'Ada', email: 'ada@example.com' }];
-      const chain = scanResolves(Model, lean);
-      await expect(service.getContactsSummary()).resolves.toBe(lean);
-      expect(chain.attributes).toHaveBeenCalledWith([
-        'id',
-        'first_name',
-        'last_name',
-        'email',
-        'phone_number',
-        'service',
+      documentClient.send.mockResolvedValue({ Items: lean });
+      await expect(service.getContactsSummary()).resolves.toEqual(lean);
+      const cmd = documentClient.send.mock.calls.at(-1)![0] as {
+        input: Record<string, unknown>;
+      };
+      expect(cmd.input.TableName).toBe('BTCTutoring-Contacts-Table');
+      expect(cmd.input.ProjectionExpression).toBe(
+        '#id, #fn, #ln, #em, #ph, #sv',
+      );
+      expect(cmd.input.ExpressionAttributeNames).toEqual({
+        '#id': 'id',
+        '#fn': 'first_name',
+        '#ln': 'last_name',
+        '#em': 'email',
+        '#ph': 'phone_number',
+        '#sv': 'service',
+      });
+      expect(cmd.input.ExclusiveStartKey).toBeUndefined();
+    });
+
+    it('follows LastEvaluatedKey across pages and concatenates items', async () => {
+      documentClient.send
+        .mockResolvedValueOnce({
+          Items: [{ id: 'c-1' }],
+          LastEvaluatedKey: { id: 'c-1' },
+        })
+        .mockResolvedValueOnce({ Items: [{ id: 'c-2' }] });
+      await expect(service.getContactsSummary()).resolves.toEqual([
+        { id: 'c-1' },
+        { id: 'c-2' },
       ]);
-      expect(chain.all).toHaveBeenCalled();
+      expect(documentClient.send).toHaveBeenCalledTimes(2);
+      const second = documentClient.send.mock.calls.at(-1)![0] as {
+        input: Record<string, unknown>;
+      };
+      expect(second.input.ExclusiveStartKey).toEqual({ id: 'c-1' });
+    });
+
+    it('tolerates a page with no Items array', async () => {
+      documentClient.send.mockResolvedValue({});
+      await expect(service.getContactsSummary()).resolves.toEqual([]);
     });
 
     it('rejects when the scan fails', async () => {
-      scanRejects(Model, new Error('scan boom'));
+      documentClient.send.mockRejectedValue(new Error('scan boom'));
       await expect(service.getContactsSummary()).rejects.toThrow('scan boom');
     });
   });
