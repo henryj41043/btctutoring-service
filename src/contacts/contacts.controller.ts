@@ -28,6 +28,7 @@ export class ContactsController {
     @Request() req: express.Request,
     @Query('id') id: string,
     @Query('staff') staff: string,
+    @Query('view') view: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = (user.groups ?? []).includes('Admins');
@@ -36,6 +37,8 @@ export class ContactsController {
         return this.contactsService.getContact(id);
       } else if (staff === 'true') {
         return this.contactsService.getStaffContacts();
+      } else if (view === 'summary') {
+        return this.contactsService.getContactsSummary();
       } else {
         return this.contactsService.getContacts();
       }
