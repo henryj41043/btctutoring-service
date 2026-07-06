@@ -34,12 +34,16 @@ export class BillingController {
     @Request() req: express.Request,
     @Query('contact') contact: string,
     @Query('period') period: string,
+    @Query('month') month: string,
   ): Promise<any> {
     this.assertAdmin(req);
     if (contact) {
       return this.billingService.getBillingRecordsByContact(contact);
     } else if (period) {
       return this.billingService.getBillingRecordsByPeriod(period);
+    } else if (month) {
+      // 'YYYY-MM' — matches both of the month's period_start dates.
+      return this.billingService.getBillingRecordsByMonth(month);
     }
     return this.billingService.getBillingRecords();
   }

@@ -51,6 +51,7 @@ export class StudentsService {
     return StudentsModel.scan({
       id: { eq: id },
     })
+      .all()
       .exec()
       .then((student) => {
         return student;
@@ -65,6 +66,7 @@ export class StudentsService {
     return StudentsModel.scan({
       contact_id: { eq: contactId },
     })
+      .all()
       .exec()
       .then((students) => {
         return students;
@@ -79,6 +81,7 @@ export class StudentsService {
     return StudentsModel.scan({
       assigned_tutor_id: { eq: tutorId },
     })
+      .all()
       .exec()
       .then((students) => {
         return students;
@@ -91,6 +94,7 @@ export class StudentsService {
 
   async getStudents() {
     return StudentsModel.scan()
+      .all()
       .exec()
       .then((students) => {
         return students;

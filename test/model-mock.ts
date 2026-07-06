@@ -35,12 +35,42 @@ export function makeModelMock(): ModelMock {
   return ctor;
 }
 
-/** Make `Model.scan(...).exec()` resolve with `value`. */
-export function scanResolves(model: ModelMock, value: unknown): void {
-  model.scan.mockReturnValue({ exec: jest.fn().mockResolvedValue(value) });
+/**
+ * A self-returning scan chain stub covering the fluent scan API the services
+ * use: `.where(...)`, range/prefix conditions, `.all()`, then `.exec()`. Tests
+ * can assert on the chain's method mocks (e.g. `chain.between`).
+ */
+export interface ScanChainMock {
+  where: jest.Mock;
+  between: jest.Mock;
+  ge: jest.Mock;
+  le: jest.Mock;
+  beginsWith: jest.Mock;
+  all: jest.Mock;
+  exec: jest.Mock;
 }
 
-/** Make `Model.scan(...).exec()` reject with `error`. */
-export function scanRejects(model: ModelMock, error: Error): void {
-  model.scan.mockReturnValue({ exec: jest.fn().mockRejectedValue(error) });
+function makeScanChain(exec: jest.Mock): ScanChainMock {
+  const chain = { exec } as ScanChainMock;
+  chain.where = jest.fn(() => chain);
+  chain.between = jest.fn(() => chain);
+  chain.ge = jest.fn(() => chain);
+  chain.le = jest.fn(() => chain);
+  chain.beginsWith = jest.fn(() => chain);
+  chain.all = jest.fn(() => chain);
+  return chain;
+}
+
+/** Make `Model.scan(...)...exec()` resolve with `value`; returns the chain for assertions. */
+export function scanResolves(model: ModelMock, value: unknown): ScanChainMock {
+  const chain = makeScanChain(jest.fn().mockResolvedValue(value));
+  model.scan.mockReturnValue(chain);
+  return chain;
+}
+
+/** Make `Model.scan(...)...exec()` reject with `error`; returns the chain for assertions. */
+export function scanRejects(model: ModelMock, error: Error): ScanChainMock {
+  const chain = makeScanChain(jest.fn().mockRejectedValue(error));
+  model.scan.mockReturnValue(chain);
+  return chain;
 }

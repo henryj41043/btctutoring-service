@@ -31,6 +31,7 @@ describe('ContactsController', () => {
     const serviceMock: Partial<jest.Mocked<ContactsService>> = {
       getContact: jest.fn(),
       getContacts: jest.fn(),
+      getStaffContacts: jest.fn(),
       createContact: jest.fn(),
       updateContact: jest.fn(),
       deleteContact: jest.fn(),
@@ -50,39 +51,51 @@ describe('ContactsController', () => {
   describe('getContacts', () => {
     it('admin with id fetches a single contact', async () => {
       service.getContact.mockResolvedValue([contact] as never);
-      await controller.getContacts(reqAs(admin), 'contact-1');
+      await controller.getContacts(reqAs(admin), 'contact-1', '');
       expect(service.getContact).toHaveBeenCalledWith('contact-1');
     });
 
     it('admin without id lists all contacts', async () => {
       service.getContacts.mockResolvedValue([contact] as never);
-      await controller.getContacts(reqAs(admin), '');
+      await controller.getContacts(reqAs(admin), '', '');
       expect(service.getContacts).toHaveBeenCalled();
+    });
+
+    it('admin with staff=true lists staff contacts only', async () => {
+      await controller.getContacts(reqAs(admin), '', 'true');
+      expect(service.getStaffContacts).toHaveBeenCalled();
+      expect(service.getContacts).not.toHaveBeenCalled();
+    });
+
+    it('a non-true staff value falls through to the full list', async () => {
+      await controller.getContacts(reqAs(admin), '', 'yes');
+      expect(service.getContacts).toHaveBeenCalled();
+      expect(service.getStaffContacts).not.toHaveBeenCalled();
     });
 
     it('non-admin may fetch their own contact', async () => {
       service.getContact.mockResolvedValue([contact] as never);
-      await controller.getContacts(reqAs(tutor), 'contact-tutor');
+      await controller.getContacts(reqAs(tutor), 'contact-tutor', '');
       expect(service.getContact).toHaveBeenCalledWith('contact-tutor');
     });
 
     it('non-admin requesting another contact is unauthorized', async () => {
       await expect(
-        controller.getContacts(reqAs(tutor), 'contact-1'),
+        controller.getContacts(reqAs(tutor), 'contact-1', ''),
       ).rejects.toThrow('Unauthorized');
       expect(service.getContact).not.toHaveBeenCalled();
     });
 
     it('non-admin without id is unauthorized', async () => {
-      await expect(controller.getContacts(reqAs(tutor), '')).rejects.toThrow(
-        'Unauthorized',
-      );
+      await expect(
+        controller.getContacts(reqAs(tutor), '', ''),
+      ).rejects.toThrow('Unauthorized');
     });
 
     it('treats a missing groups array as non-admin', async () => {
       const noGroups = { ...tutor, groups: undefined } as unknown as User;
       await expect(
-        controller.getContacts(reqAs(noGroups), 'contact-1'),
+        controller.getContacts(reqAs(noGroups), 'contact-1', ''),
       ).rejects.toThrow('Unauthorized');
     });
   });

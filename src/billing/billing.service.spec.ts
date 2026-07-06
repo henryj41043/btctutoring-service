@@ -57,6 +57,22 @@ describe('BillingService', () => {
       });
     });
 
+    it('getBillingRecordsByMonth prefix-matches period_start and paginates fully', async () => {
+      const chain = scanResolves(Model, [{ id: 'c-1#2026-07-01' }]);
+      const result = await service.getBillingRecordsByMonth('2026-07');
+      expect(chain.where).toHaveBeenCalledWith('period_start');
+      expect(chain.beginsWith).toHaveBeenCalledWith('2026-07');
+      expect(chain.all).toHaveBeenCalled();
+      expect(result).toEqual([{ id: 'c-1#2026-07-01' }]);
+    });
+
+    it('getBillingRecordsByMonth rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getBillingRecordsByMonth('2026-07')).rejects.toThrow(
+        'scan boom',
+      );
+    });
+
     it('getBillingRecords scans everything', async () => {
       scanResolves(Model, []);
       await service.getBillingRecords();

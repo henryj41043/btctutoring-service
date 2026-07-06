@@ -12,7 +12,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { SessionsService } from './sessions.service';
+import { SessionsService, SessionRange } from './sessions.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
@@ -29,30 +29,36 @@ export class SessionsController {
     @Query('tutor') tutor: string,
     @Query('student') student: string,
     @Query('series') series: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     const isTutor: boolean = user.groups.includes('Tutors');
     const idMatchesTutor: boolean = tutor === user.email;
+    // Optional start_datetime range; combinable with tutor/student filters.
+    // Range params never change who may see what — the auth matrix is unchanged.
+    const range: SessionRange | undefined =
+      from || to ? { from: from || undefined, to: to || undefined } : undefined;
     if (series) {
       if (isAdmin) {
         return this.sessionsService.getSessionsBySeries(series);
       }
     } else if (tutor && student) {
       if (isAdmin || (isTutor && idMatchesTutor)) {
-        return this.sessionsService.getSessions(tutor, student);
+        return this.sessionsService.getSessions(tutor, student, range);
       }
     } else if (tutor) {
       if (isAdmin || (isTutor && idMatchesTutor)) {
-        return this.sessionsService.getSessionsByTutor(tutor);
+        return this.sessionsService.getSessionsByTutor(tutor, range);
       }
     } else if (student) {
       if (isAdmin) {
-        return this.sessionsService.getSessionsByStudent(student);
+        return this.sessionsService.getSessionsByStudent(student, range);
       }
     } else {
       if (isAdmin) {
-        return this.sessionsService.getAllSessions();
+        return this.sessionsService.getAllSessions(range);
       }
     }
     Logger.error('Invalid parameters for given user credentials');

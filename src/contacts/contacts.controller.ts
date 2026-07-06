@@ -27,12 +27,15 @@ export class ContactsController {
   async getContacts(
     @Request() req: express.Request,
     @Query('id') id: string,
+    @Query('staff') staff: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       if (id) {
         return this.contactsService.getContact(id);
+      } else if (staff === 'true') {
+        return this.contactsService.getStaffContacts();
       } else {
         return this.contactsService.getContacts();
       }

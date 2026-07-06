@@ -9,6 +9,7 @@ export class ContactsService {
     return ContactsModel.scan({
       id: { eq: id },
     })
+      .all()
       .exec()
       .then((contacts) => {
         return contacts;
@@ -21,6 +22,24 @@ export class ContactsService {
 
   async getContacts() {
     return ContactsModel.scan()
+      .all()
+      .exec()
+      .then((contacts) => {
+        return contacts;
+      })
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /** Current staff only (service=Hiring, status=Staff) — the tutor dropdowns. */
+  async getStaffContacts() {
+    return ContactsModel.scan({
+      service: { eq: 'Hiring' },
+      status: { eq: 'Staff' },
+    })
+      .all()
       .exec()
       .then((contacts) => {
         return contacts;
@@ -38,8 +57,9 @@ export class ContactsService {
    */
   private async findByEmail(email: string): Promise<Contact | undefined> {
     const normalized = email.trim().toLowerCase();
-    const contacts =
-      (await ContactsModel.scan().exec()) as unknown as Contact[];
+    const contacts = (await ContactsModel.scan()
+      .all()
+      .exec()) as unknown as Contact[];
     return contacts.find((c) => c.email?.trim().toLowerCase() === normalized);
   }
 
