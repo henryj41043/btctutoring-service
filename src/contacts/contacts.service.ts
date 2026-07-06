@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
@@ -31,7 +31,22 @@ export class ContactsService {
       });
   }
 
+  /**
+   * A contact's unique identifier is their email. Compares case-insensitively
+   * (and ignoring surrounding whitespace) so Jane@x.com can't duplicate
+   * jane@x.com.
+   */
+  private async findByEmail(email: string): Promise<Contact | undefined> {
+    const normalized = email.trim().toLowerCase();
+    const contacts =
+      (await ContactsModel.scan().exec()) as unknown as Contact[];
+    return contacts.find((c) => c.email?.trim().toLowerCase() === normalized);
+  }
+
   async createContact(contact: Contact) {
+    if (contact.email && (await this.findByEmail(contact.email))) {
+      throw new ConflictException('A contact with this email already exists.');
+    }
     const newUuid: string = randomUUID();
     const newContact = new ContactsModel({
       id: newUuid,

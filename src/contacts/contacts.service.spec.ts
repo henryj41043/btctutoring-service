@@ -69,6 +69,7 @@ describe('ContactsService', () => {
 
   describe('createContact', () => {
     it('saves a new contact and returns a generated id', async () => {
+      scanResolves(Model, []); // duplicate-email check finds nothing
       Model.__save.mockResolvedValue(undefined);
 
       const result = await service.createContact(
@@ -96,6 +97,7 @@ describe('ContactsService', () => {
     });
 
     it('handles a contact without an availability list', async () => {
+      scanResolves(Model, []);
       Model.__save.mockResolvedValue(undefined);
       const result = await service.createContact(
         sampleContact({ availability: undefined }),
@@ -104,10 +106,44 @@ describe('ContactsService', () => {
     });
 
     it('rejects when save fails', async () => {
+      scanResolves(Model, []);
       Model.__save.mockRejectedValue(new Error('save boom'));
       await expect(service.createContact(sampleContact())).rejects.toThrow(
         'save boom',
       );
+    });
+  });
+
+  describe('createContact duplicate email', () => {
+    it('rejects with a conflict when the email already exists', async () => {
+      scanResolves(Model, [sampleContact()]); // ada@example.com taken
+      await expect(
+        service.createContact(sampleContact({ id: undefined })),
+      ).rejects.toThrow('A contact with this email already exists.');
+      expect(Model.__save).not.toHaveBeenCalled();
+    });
+
+    it('matches emails case-insensitively and ignoring whitespace', async () => {
+      scanResolves(Model, [sampleContact({ email: 'Ada@Example.com ' })]);
+      await expect(
+        service.createContact(sampleContact({ email: '  ADA@example.COM' })),
+      ).rejects.toThrow('A contact with this email already exists.');
+    });
+
+    it('creates when the email is unused', async () => {
+      scanResolves(Model, [sampleContact({ email: 'other@example.com' })]);
+      Model.__save.mockResolvedValue(undefined);
+      const result = await service.createContact(sampleContact());
+      expect(result.message).toBe('Contact created successfully.');
+    });
+
+    it('skips the check when no email is provided', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      const result = await service.createContact(
+        sampleContact({ email: undefined }),
+      );
+      expect(Model.scan).not.toHaveBeenCalled();
+      expect(result.message).toBe('Contact created successfully.');
     });
   });
 
