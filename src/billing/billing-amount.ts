@@ -1,6 +1,6 @@
 import { Student } from '../models/student.model';
 import { resolvePackageDef } from './package-config';
-import { countMissedSlots, proratedFirstMonthCost } from './proration';
+import { countRemainingSlots, proratedFirstMonthCost } from './proration';
 
 /**
  * Server-side mirror of the frontend billing-amount helper
@@ -29,10 +29,11 @@ export function studentMonthlyCharge(
   const start = new Date(student.package_start_date);
   if (start > monthEnd) return 0;
   if (start >= monthStart && start <= monthEnd && start.getDate() > 1) {
-    return proratedFirstMonthCost(
-      def,
-      countMissedSlots(student.schedule ?? [], start),
-    );
+    // Without a schedule the remaining slots can't be counted — fall back to
+    // the full monthly cost rather than silently billing $0.
+    const schedule = student.schedule ?? [];
+    if (schedule.length === 0) return def.monthlyCost;
+    return proratedFirstMonthCost(def, countRemainingSlots(schedule, start));
   }
   return def.monthlyCost;
 }
