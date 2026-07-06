@@ -67,6 +67,24 @@ describe('ContactsService', () => {
     });
   });
 
+  describe('getStaffContacts', () => {
+    it('scans for Hiring staff only and paginates fully', async () => {
+      const staff = [sampleContact({ service: 'Hiring', status: 'Staff' })];
+      const chain = scanResolves(Model, staff);
+      await expect(service.getStaffContacts()).resolves.toBe(staff);
+      expect(Model.scan).toHaveBeenCalledWith({
+        service: { eq: 'Hiring' },
+        status: { eq: 'Staff' },
+      });
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getStaffContacts()).rejects.toThrow('scan boom');
+    });
+  });
+
   describe('createContact', () => {
     it('saves a new contact and returns a generated id', async () => {
       scanResolves(Model, []); // duplicate-email check finds nothing

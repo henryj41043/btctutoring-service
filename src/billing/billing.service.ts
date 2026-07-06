@@ -11,6 +11,7 @@ export class BillingService {
 
   async getBillingRecords() {
     return BillingModel.scan()
+      .all()
       .exec()
       .then((records) => records)
       .catch((error: Error) => {
@@ -21,6 +22,7 @@ export class BillingService {
 
   async getBillingRecordsByContact(contactId: string) {
     return BillingModel.scan({ contact_id: { eq: contactId } })
+      .all()
       .exec()
       .then((records) => records)
       .catch((error: Error) => {
@@ -31,6 +33,21 @@ export class BillingService {
 
   async getBillingRecordsByPeriod(periodStart: string) {
     return BillingModel.scan({ period_start: { eq: periodStart } })
+      .all()
+      .exec()
+      .then((records) => records)
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /** All of a month's records (both the 1st and 15th periods) in one call. */
+  async getBillingRecordsByMonth(month: string) {
+    return BillingModel.scan()
+      .where('period_start')
+      .beginsWith(month)
+      .all()
       .exec()
       .then((records) => records)
       .catch((error: Error) => {

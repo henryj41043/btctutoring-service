@@ -9,6 +9,7 @@ export class NotesService {
     return NotesModel.scan({
       id: { eq: id },
     })
+      .all()
       .exec()
       .then((note) => {
         return note;
@@ -23,6 +24,7 @@ export class NotesService {
     return NotesModel.scan({
       author_id: { eq: authorId },
     })
+      .all()
       .exec()
       .then((notes) => {
         return notes;
@@ -37,6 +39,7 @@ export class NotesService {
     return NotesModel.scan({
       recipient_id: { eq: recipientId },
     })
+      .all()
       .exec()
       .then((notes) => {
         return notes;
@@ -49,6 +52,7 @@ export class NotesService {
 
   async getNotes() {
     return NotesModel.scan()
+      .all()
       .exec()
       .then((notes) => {
         return notes;

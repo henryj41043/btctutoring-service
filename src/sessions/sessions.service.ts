@@ -3,13 +3,48 @@ import { SessionsModel } from '../models/sessions.model';
 import { Session } from '../models/session.model';
 import { randomUUID } from 'crypto';
 
+/** Optional start_datetime range (ISO strings; ISO sorts lexically). */
+export interface SessionRange {
+  from?: string;
+  to?: string;
+}
+
 @Injectable()
 export class SessionsService {
-  async getSessions(tutor: string, student: string) {
-    return SessionsModel.scan({
-      tutor_id: { eq: tutor },
-      student_id: { eq: student },
-    })
+  /**
+   * Applies an optional start_datetime range to a scan. ISO-8601 strings
+   * compare lexically, so plain string bounds are correct.
+   */
+  private applyRange<
+    T extends {
+      where: (key: string) => {
+        between: (a: string, b: string) => unknown;
+        ge: (value: string) => unknown;
+        le: (value: string) => unknown;
+      };
+    },
+  >(scan: T, range?: SessionRange): T {
+    if (range?.from && range?.to) {
+      return scan.where('start_datetime').between(range.from, range.to) as T;
+    }
+    if (range?.from) {
+      return scan.where('start_datetime').ge(range.from) as T;
+    }
+    if (range?.to) {
+      return scan.where('start_datetime').le(range.to) as T;
+    }
+    return scan;
+  }
+
+  async getSessions(tutor: string, student: string, range?: SessionRange) {
+    return this.applyRange(
+      SessionsModel.scan({
+        tutor_id: { eq: tutor },
+        student_id: { eq: student },
+      }),
+      range,
+    )
+      .all()
       .exec()
       .then((sessions) => {
         return sessions;
@@ -20,10 +55,14 @@ export class SessionsService {
       });
   }
 
-  async getSessionsByTutor(tutor: string) {
-    return SessionsModel.scan({
-      tutor_id: { eq: tutor },
-    })
+  async getSessionsByTutor(tutor: string, range?: SessionRange) {
+    return this.applyRange(
+      SessionsModel.scan({
+        tutor_id: { eq: tutor },
+      }),
+      range,
+    )
+      .all()
       .exec()
       .then((sessions) => {
         return sessions;
@@ -34,10 +73,14 @@ export class SessionsService {
       });
   }
 
-  async getSessionsByStudent(student: string) {
-    return SessionsModel.scan({
-      student_id: { eq: student },
-    })
+  async getSessionsByStudent(student: string, range?: SessionRange) {
+    return this.applyRange(
+      SessionsModel.scan({
+        student_id: { eq: student },
+      }),
+      range,
+    )
+      .all()
       .exec()
       .then((sessions) => {
         return sessions;
@@ -48,8 +91,9 @@ export class SessionsService {
       });
   }
 
-  async getAllSessions() {
-    return SessionsModel.scan()
+  async getAllSessions(range?: SessionRange) {
+    return this.applyRange(SessionsModel.scan(), range)
+      .all()
       .exec()
       .then((sessions) => {
         return sessions;
@@ -64,6 +108,7 @@ export class SessionsService {
     return SessionsModel.scan({
       series_id: { eq: seriesId },
     })
+      .all()
       .exec()
       .then((sessions) => {
         return sessions;

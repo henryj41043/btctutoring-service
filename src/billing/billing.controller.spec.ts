@@ -30,6 +30,7 @@ describe('BillingController', () => {
       getBillingRecords: jest.fn(),
       getBillingRecordsByContact: jest.fn(),
       getBillingRecordsByPeriod: jest.fn(),
+      getBillingRecordsByMonth: jest.fn(),
       upsertBillingRecord: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
@@ -47,34 +48,40 @@ describe('BillingController', () => {
   describe('getBillingRecords', () => {
     it('admin fetches by contact', async () => {
       service.getBillingRecordsByContact.mockResolvedValue([] as never);
-      await controller.getBillingRecords(reqAs(admin), 'c-1', '');
+      await controller.getBillingRecords(reqAs(admin), 'c-1', '', '');
       expect(service.getBillingRecordsByContact).toHaveBeenCalledWith('c-1');
     });
 
     it('admin fetches by period', async () => {
       service.getBillingRecordsByPeriod.mockResolvedValue([] as never);
-      await controller.getBillingRecords(reqAs(admin), '', '2026-07-01');
+      await controller.getBillingRecords(reqAs(admin), '', '2026-07-01', '');
       expect(service.getBillingRecordsByPeriod).toHaveBeenCalledWith(
         '2026-07-01',
       );
     });
 
+    it('admin fetches by month', async () => {
+      await controller.getBillingRecords(reqAs(admin), '', '', '2026-07');
+      expect(service.getBillingRecordsByMonth).toHaveBeenCalledWith('2026-07');
+      expect(service.getBillingRecords).not.toHaveBeenCalled();
+    });
+
     it('admin lists all when no filter is given', async () => {
       service.getBillingRecords.mockResolvedValue([] as never);
-      await controller.getBillingRecords(reqAs(admin), '', '');
+      await controller.getBillingRecords(reqAs(admin), '', '', '');
       expect(service.getBillingRecords).toHaveBeenCalled();
     });
 
     it('non-admin is unauthorized', async () => {
       await expect(
-        controller.getBillingRecords(reqAs(tutor), '', ''),
+        controller.getBillingRecords(reqAs(tutor), '', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
 
     it('treats a missing groups array as non-admin', async () => {
       const noGroups = { ...tutor, groups: undefined } as unknown as User;
       await expect(
-        controller.getBillingRecords(reqAs(noGroups), '', ''),
+        controller.getBillingRecords(reqAs(noGroups), '', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
   });

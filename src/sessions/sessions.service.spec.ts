@@ -95,6 +95,59 @@ describe('SessionsService', () => {
     });
   });
 
+  describe('start_datetime range filtering', () => {
+    it('applies between when both bounds are given', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessionsByTutor('tutor@example.com', {
+        from: '2026-07-01T00:00:00Z',
+        to: '2026-07-31T23:59:59Z',
+      });
+      expect(chain.where).toHaveBeenCalledWith('start_datetime');
+      expect(chain.between).toHaveBeenCalledWith(
+        '2026-07-01T00:00:00Z',
+        '2026-07-31T23:59:59Z',
+      );
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('applies ge for a from-only range', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getAllSessions({ from: '2026-07-01T00:00:00Z' });
+      expect(chain.where).toHaveBeenCalledWith('start_datetime');
+      expect(chain.ge).toHaveBeenCalledWith('2026-07-01T00:00:00Z');
+      expect(chain.between).not.toHaveBeenCalled();
+    });
+
+    it('applies le for a to-only range', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessionsByStudent('student-1', {
+        to: '2026-07-31T23:59:59Z',
+      });
+      expect(chain.le).toHaveBeenCalledWith('2026-07-31T23:59:59Z');
+      expect(chain.ge).not.toHaveBeenCalled();
+    });
+
+    it('applies no condition without a range and still paginates fully', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessions('tutor@example.com', 'student-1');
+      expect(chain.where).not.toHaveBeenCalled();
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('combines equality filters with the range', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessions('tutor@example.com', 'student-1', {
+        from: 'A',
+        to: 'B',
+      });
+      expect(Model.scan).toHaveBeenCalledWith({
+        tutor_id: { eq: 'tutor@example.com' },
+        student_id: { eq: 'student-1' },
+      });
+      expect(chain.between).toHaveBeenCalledWith('A', 'B');
+    });
+  });
+
   describe('createSession', () => {
     it('saves a session and returns a generated id', async () => {
       Model.__save.mockResolvedValue(undefined);

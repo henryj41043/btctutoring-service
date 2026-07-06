@@ -70,13 +70,13 @@ describe('SessionsController', () => {
 
   describe('getSessions routing', () => {
     it('admin + series -> getSessionsBySeries', async () => {
-      await controller.getSessions(reqAs(admin), '', '', 'series-1');
+      await controller.getSessions(reqAs(admin), '', '', 'series-1', '', '');
       expect(service.getSessionsBySeries).toHaveBeenCalledWith('series-1');
     });
 
     it('non-admin + series -> unauthorized', async () => {
       await expect(
-        controller.getSessions(reqAs(tutor), '', '', 'series-1'),
+        controller.getSessions(reqAs(tutor), '', '', 'series-1', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
 
@@ -86,10 +86,13 @@ describe('SessionsController', () => {
         'tutor@example.com',
         'stu-1',
         '',
+        '',
+        '',
       );
       expect(service.getSessions).toHaveBeenCalledWith(
         'tutor@example.com',
         'stu-1',
+        undefined,
       );
     });
 
@@ -99,58 +102,94 @@ describe('SessionsController', () => {
         'tutor@example.com',
         'stu-1',
         '',
+        '',
+        '',
       );
       expect(service.getSessions).toHaveBeenCalledWith(
         'tutor@example.com',
         'stu-1',
+        undefined,
       );
     });
 
     it('tutor querying another tutor + student -> unauthorized', async () => {
       await expect(
-        controller.getSessions(reqAs(tutor), 'other@example.com', 'stu-1', ''),
+        controller.getSessions(
+          reqAs(tutor),
+          'other@example.com',
+          'stu-1',
+          '',
+          '',
+          '',
+        ),
       ).rejects.toThrow('Unauthorized');
     });
 
     it('admin + tutor only -> getSessionsByTutor', async () => {
-      await controller.getSessions(reqAs(admin), 'tutor@example.com', '', '');
+      await controller.getSessions(
+        reqAs(admin),
+        'tutor@example.com',
+        '',
+        '',
+        '',
+        '',
+      );
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
         'tutor@example.com',
+        undefined,
       );
     });
 
     it('owning tutor + tutor only -> getSessionsByTutor', async () => {
-      await controller.getSessions(reqAs(tutor), 'tutor@example.com', '', '');
+      await controller.getSessions(
+        reqAs(tutor),
+        'tutor@example.com',
+        '',
+        '',
+        '',
+        '',
+      );
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
         'tutor@example.com',
+        undefined,
       );
     });
 
     it('tutor querying another tutor -> unauthorized', async () => {
       await expect(
-        controller.getSessions(reqAs(tutor), 'other@example.com', '', ''),
+        controller.getSessions(
+          reqAs(tutor),
+          'other@example.com',
+          '',
+          '',
+          '',
+          '',
+        ),
       ).rejects.toThrow('Unauthorized');
     });
 
     it('admin + student only -> getSessionsByStudent', async () => {
-      await controller.getSessions(reqAs(admin), '', 'stu-1', '');
-      expect(service.getSessionsByStudent).toHaveBeenCalledWith('stu-1');
+      await controller.getSessions(reqAs(admin), '', 'stu-1', '', '', '');
+      expect(service.getSessionsByStudent).toHaveBeenCalledWith(
+        'stu-1',
+        undefined,
+      );
     });
 
     it('non-admin + student only -> unauthorized', async () => {
       await expect(
-        controller.getSessions(reqAs(tutor), '', 'stu-1', ''),
+        controller.getSessions(reqAs(tutor), '', 'stu-1', '', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
 
     it('admin + no params -> getAllSessions', async () => {
-      await controller.getSessions(reqAs(admin), '', '', '');
+      await controller.getSessions(reqAs(admin), '', '', '', '', '');
       expect(service.getAllSessions).toHaveBeenCalled();
     });
 
     it('non-admin + no params -> unauthorized', async () => {
       await expect(
-        controller.getSessions(reqAs(stranger), '', '', ''),
+        controller.getSessions(reqAs(stranger), '', '', '', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
   });
