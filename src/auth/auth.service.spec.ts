@@ -214,6 +214,34 @@ describe('AuthService', () => {
       ).toHaveLength(0);
     });
 
+    it('adds the group when the user is currently in none', async () => {
+      // No Groups key at all, and a nameless entry — neither triggers a removal.
+      cognitoMock
+        .on(AdminListGroupsForUserCommand)
+        .resolves({ Groups: [{ Description: 'nameless' }] });
+      cognitoMock.on(AdminAddUserToGroupCommand).resolves({});
+      await expect(
+        service.adminUpdateUserGroup('a@b.com', 'Tutors'),
+      ).resolves.toMatchObject({ success: true });
+      expect(
+        cognitoMock.commandCalls(AdminRemoveUserFromGroupCommand),
+      ).toHaveLength(0);
+      expect(cognitoMock.commandCalls(AdminAddUserToGroupCommand)).toHaveLength(
+        1,
+      );
+    });
+
+    it('handles a response with no Groups field', async () => {
+      cognitoMock.on(AdminListGroupsForUserCommand).resolves({});
+      cognitoMock.on(AdminAddUserToGroupCommand).resolves({});
+      await expect(
+        service.adminUpdateUserGroup('a@b.com', 'Admins'),
+      ).resolves.toMatchObject({ success: true });
+      expect(
+        cognitoMock.commandCalls(AdminRemoveUserFromGroupCommand),
+      ).toHaveLength(0);
+    });
+
     it('rejects an invalid group before touching Cognito', async () => {
       await expect(
         service.adminUpdateUserGroup('a@b.com', 'Nope'),
