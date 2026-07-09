@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import {
   CognitoIdentityProviderClient,
   SignUpCommand,
@@ -10,6 +15,8 @@ import {
   AuthenticationResultType,
   UserType,
   AdminAddUserToGroupCommand,
+  AdminRemoveUserFromGroupCommand,
+  AdminListGroupsForUserCommand,
   AdminDeleteUserCommand,
   InitiateAuthCommandOutput,
   ChangePasswordCommand,
@@ -18,6 +25,9 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import * as crypto from 'crypto';
 import { ResponseDto } from './dto/response.dto';
+
+/** The Cognito groups a user account may belong to. A user must be in exactly one. */
+export const VALID_USER_GROUPS = ['Admins', 'Tutors'];
 
 @Injectable()
 export class AuthService {
@@ -129,34 +139,116 @@ export class AuthService {
     }
   }
 
+  /** Rejects unless `group` is one of the valid Cognito groups. */
+  private assertValidGroup(group: string): void {
+    if (!group || !VALID_USER_GROUPS.includes(group)) {
+      throw new BadRequestException(
+        'A valid group (Admins or Tutors) is required to create a user.',
+      );
+    }
+  }
+
+  /**
+   * Creates a Cognito user and assigns their group. A user must belong to a
+   * group to access the app, so a missing/invalid group is rejected up front,
+   * and if the group assignment fails after the user is created the new user is
+   * deleted (rolled back) so we never leave an orphaned, group-less account.
+   */
   async adminCreateUser(
     email: string,
     group: string,
     id: string,
-  ): Promise<ResponseDto | UserType> {
-    const createUserCommand = new AdminCreateUserCommand({
-      UserPoolId: this.userPoolId,
-      Username: email,
-      UserAttributes: [
-        { Name: 'email', Value: email },
-        { Name: 'email_verified', Value: 'true' },
-        { Name: 'custom:contact_id', Value: id },
-      ],
-      DesiredDeliveryMediums: ['EMAIL'],
-    });
+  ): Promise<UserType> {
+    this.assertValidGroup(group);
+
+    let user: UserType;
     try {
-      const createUserResponse = await this.adminClient.send(createUserCommand);
-      const user: UserType = createUserResponse.User!;
-      const addUserToGroupCommand = new AdminAddUserToGroupCommand({
-        UserPoolId: this.userPoolId,
-        Username: user.Username,
-        GroupName: group,
-      });
-      await this.adminClient.send(addUserToGroupCommand);
-      return createUserResponse.User!;
+      const createUserResponse = await this.adminClient.send(
+        new AdminCreateUserCommand({
+          UserPoolId: this.userPoolId,
+          Username: email,
+          UserAttributes: [
+            { Name: 'email', Value: email },
+            { Name: 'email_verified', Value: 'true' },
+            { Name: 'custom:contact_id', Value: id },
+          ],
+          DesiredDeliveryMediums: ['EMAIL'],
+        }),
+      );
+      user = createUserResponse.User!;
     } catch (error) {
       Logger.error(error);
-      return { message: 'Create user failed.' } as ResponseDto;
+      throw new InternalServerErrorException('Create user failed.');
+    }
+
+    try {
+      await this.adminClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: this.userPoolId,
+          Username: user.Username,
+          GroupName: group,
+        }),
+      );
+    } catch (error) {
+      Logger.error(error);
+      // Roll back: a user with no group would be locked out of the whole app.
+      try {
+        await this.adminClient.send(
+          new AdminDeleteUserCommand({
+            UserPoolId: this.userPoolId,
+            Username: user.Username,
+          }),
+        );
+      } catch (cleanupError) {
+        Logger.error(cleanupError);
+      }
+      throw new InternalServerErrorException(
+        'Failed to assign the user to a group; user creation was rolled back.',
+      );
+    }
+
+    return user;
+  }
+
+  /**
+   * Moves an existing user to `group`, keeping them in exactly one group:
+   * removes them from every other group they currently belong to, then adds the
+   * new one. Used to keep Cognito in sync when an admin changes a contact's group.
+   */
+  async adminUpdateUserGroup(
+    email: string,
+    group: string,
+  ): Promise<ResponseDto> {
+    this.assertValidGroup(group);
+    try {
+      const current = await this.adminClient.send(
+        new AdminListGroupsForUserCommand({
+          UserPoolId: this.userPoolId,
+          Username: email,
+        }),
+      );
+      for (const existing of current.Groups ?? []) {
+        if (existing.GroupName && existing.GroupName !== group) {
+          await this.adminClient.send(
+            new AdminRemoveUserFromGroupCommand({
+              UserPoolId: this.userPoolId,
+              Username: email,
+              GroupName: existing.GroupName,
+            }),
+          );
+        }
+      }
+      await this.adminClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: this.userPoolId,
+          Username: email,
+          GroupName: group,
+        }),
+      );
+      return { message: 'User group updated successfully.', success: true };
+    } catch (error) {
+      Logger.error(error);
+      throw new InternalServerErrorException('Failed to update user group.');
     }
   }
 

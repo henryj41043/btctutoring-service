@@ -36,6 +36,7 @@ describe('AuthController', () => {
       forgotPassword: jest.fn(),
       confirmForgotPassword: jest.fn(),
       adminCreateUser: jest.fn(),
+      adminUpdateUserGroup: jest.fn(),
       adminDeleteUser: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
@@ -145,6 +146,29 @@ describe('AuthController', () => {
         }),
       ).rejects.toThrow('Unauthorized');
       expect(service.adminCreateUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateUserGroup', () => {
+    it('admin updates a user group', async () => {
+      await controller.updateUserGroup(reqAs(admin), {
+        email: 'new@b.com',
+        group: 'Admins',
+      });
+      expect(service.adminUpdateUserGroup).toHaveBeenCalledWith(
+        'new@b.com',
+        'Admins',
+      );
+    });
+
+    it('non-admin is rejected', async () => {
+      await expect(
+        controller.updateUserGroup(reqAs(tutor), {
+          email: 'new@b.com',
+          group: 'Admins',
+        }),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.adminUpdateUserGroup).not.toHaveBeenCalled();
     });
   });
 
