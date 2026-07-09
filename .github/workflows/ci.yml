@@ -18,6 +18,8 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run lint
+      # Authoritative 95% coverage gate. Deploy does NOT re-check the coverage
+      # percentage (see deploy.yml) — this PR check is where it's enforced.
       - name: Unit + integration tests with 95% coverage gate
         run: npm run test:cov
       - name: End-to-end tests (mocked AWS + DynamoDB)
