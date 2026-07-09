@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Put,
   Body,
   Get,
   UseGuards,
@@ -18,6 +19,7 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { CreateUserDto } from './dto/create.user.dto';
+import { UpdateUserGroupDto } from './dto/update.user.group.dto';
 import { NewPasswordDto } from './dto/new.password.dto';
 import { ResponseDto } from './dto/response.dto';
 import { ChangePasswordDto } from './dto/change.password.dto';
@@ -110,6 +112,21 @@ export class AuthController {
       throw new ForbiddenException('Unauthorized');
     }
     return this.authService.adminCreateUser(dto.email, dto.group, dto.id);
+  }
+
+  @Put('user/group')
+  @UseGuards(AuthGuard('jwt'))
+  async updateUserGroup(
+    @Request() req: express.Request,
+    @Body() dto: UpdateUserGroupDto,
+  ): Promise<ResponseDto> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = user.groups.includes('Admins');
+    if (!isAdmin) {
+      Logger.error('Only Admins have access to user data');
+      throw new ForbiddenException('Unauthorized');
+    }
+    return this.authService.adminUpdateUserGroup(dto.email, dto.group);
   }
 
   @Delete('user/:id')

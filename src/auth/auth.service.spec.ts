@@ -4,6 +4,8 @@ import {
   AdminAddUserToGroupCommand,
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
+  AdminListGroupsForUserCommand,
+  AdminRemoveUserFromGroupCommand,
   ChangePasswordCommand,
   CognitoIdentityProviderClient,
   ConfirmForgotPasswordCommand,
@@ -135,11 +137,97 @@ describe('AuthService', () => {
       );
     });
 
-    it('returns a failure message on error', async () => {
+    it.each([
+      ['', 'empty'],
+      ['Managers', 'unknown'],
+    ])('rejects a %s group without creating anyone (%s)', async (group) => {
+      await expect(
+        service.adminCreateUser('a@b.com', group, 'contact-1'),
+      ).rejects.toThrow(/valid group/i);
+      expect(cognitoMock.commandCalls(AdminCreateUserCommand)).toHaveLength(0);
+    });
+
+    it('throws when user creation fails', async () => {
       cognitoMock.on(AdminCreateUserCommand).rejects(new Error('boom'));
       await expect(
         service.adminCreateUser('a@b.com', 'Tutors', 'contact-1'),
-      ).resolves.toEqual({ message: 'Create user failed.' });
+      ).rejects.toThrow('Create user failed.');
+    });
+
+    it('rolls back the created user when the group assignment fails', async () => {
+      cognitoMock
+        .on(AdminCreateUserCommand)
+        .resolves({ User: { Username: 'a@b.com' } });
+      cognitoMock.on(AdminAddUserToGroupCommand).rejects(new Error('no group'));
+      cognitoMock.on(AdminDeleteUserCommand).resolves({});
+      await expect(
+        service.adminCreateUser('a@b.com', 'Tutors', 'contact-1'),
+      ).rejects.toThrow(/rolled back/i);
+      // The orphaned, group-less user is deleted.
+      const del = cognitoMock.commandCalls(AdminDeleteUserCommand);
+      expect(del).toHaveLength(1);
+      expect(del[0].args[0].input.Username).toBe('a@b.com');
+    });
+
+    it('still throws if the rollback delete also fails', async () => {
+      cognitoMock
+        .on(AdminCreateUserCommand)
+        .resolves({ User: { Username: 'a@b.com' } });
+      cognitoMock.on(AdminAddUserToGroupCommand).rejects(new Error('no group'));
+      cognitoMock.on(AdminDeleteUserCommand).rejects(new Error('cleanup boom'));
+      await expect(
+        service.adminCreateUser('a@b.com', 'Tutors', 'contact-1'),
+      ).rejects.toThrow(/rolled back/i);
+    });
+  });
+
+  describe('adminUpdateUserGroup', () => {
+    it('removes other groups and adds the target group', async () => {
+      cognitoMock
+        .on(AdminListGroupsForUserCommand)
+        .resolves({ Groups: [{ GroupName: 'Tutors' }] });
+      cognitoMock.on(AdminRemoveUserFromGroupCommand).resolves({});
+      cognitoMock.on(AdminAddUserToGroupCommand).resolves({});
+      await expect(
+        service.adminUpdateUserGroup('a@b.com', 'Admins'),
+      ).resolves.toEqual({
+        message: 'User group updated successfully.',
+        success: true,
+      });
+      const removed = cognitoMock.commandCalls(AdminRemoveUserFromGroupCommand);
+      expect(removed).toHaveLength(1);
+      expect(removed[0].args[0].input.GroupName).toBe('Tutors');
+      expect(
+        cognitoMock.commandCalls(AdminAddUserToGroupCommand)[0].args[0].input
+          .GroupName,
+      ).toBe('Admins');
+    });
+
+    it('leaves the target group in place (no self-removal)', async () => {
+      cognitoMock
+        .on(AdminListGroupsForUserCommand)
+        .resolves({ Groups: [{ GroupName: 'Admins' }] });
+      cognitoMock.on(AdminAddUserToGroupCommand).resolves({});
+      await service.adminUpdateUserGroup('a@b.com', 'Admins');
+      expect(
+        cognitoMock.commandCalls(AdminRemoveUserFromGroupCommand),
+      ).toHaveLength(0);
+    });
+
+    it('rejects an invalid group before touching Cognito', async () => {
+      await expect(
+        service.adminUpdateUserGroup('a@b.com', 'Nope'),
+      ).rejects.toThrow(/valid group/i);
+      expect(
+        cognitoMock.commandCalls(AdminListGroupsForUserCommand),
+      ).toHaveLength(0);
+    });
+
+    it('throws when a Cognito call fails', async () => {
+      cognitoMock.on(AdminListGroupsForUserCommand).rejects(new Error('boom'));
+      await expect(
+        service.adminUpdateUserGroup('a@b.com', 'Admins'),
+      ).rejects.toThrow('Failed to update user group.');
     });
   });
 
