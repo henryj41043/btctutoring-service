@@ -12,6 +12,7 @@ export interface ModelMock extends jest.Mock {
   update: jest.Mock;
   delete: jest.Mock;
   batchPut: jest.Mock;
+  batchGet: jest.Mock;
   /** The shared `save` mock returned by every `new Model(...)` instance. */
   __save: jest.Mock;
 }
@@ -31,6 +32,7 @@ export function makeModelMock(): ModelMock {
   ctor.update = jest.fn();
   ctor.delete = jest.fn();
   ctor.batchPut = jest.fn();
+  ctor.batchGet = jest.fn();
   ctor.__save = save;
   return ctor;
 }

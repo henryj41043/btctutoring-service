@@ -22,6 +22,19 @@ import { Student } from '../models/student.model';
 export class StudentsController {
   constructor(private readonly studentsService: StudentsService) {}
 
+  @Get('onboarding')
+  @UseGuards(AuthGuard('jwt'))
+  async getOnboardingStudents(@Request() req: express.Request): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = user.groups.includes('Admins');
+    if (isAdmin) {
+      return this.studentsService.getOnboardingStudents();
+    } else {
+      Logger.error('User not authorized to get onboarding students');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Get()
   @UseGuards(AuthGuard('jwt'))
   async getStudents(

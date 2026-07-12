@@ -10,6 +10,8 @@ export class Student {
   name: string;
   birthday: string;
   status: string;
+  /** True once the student has finished onboarding; gates status/package/tutor/schedule edits. */
+  onboarding_complete?: boolean;
   assigned_tutor_id: string;
   package: string;
   scholarship?: boolean;

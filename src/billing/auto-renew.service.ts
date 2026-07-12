@@ -11,8 +11,9 @@ import { Session, SessionType } from '../models/session.model';
 import { round2 } from './package-config';
 import { semiMonthlySplit } from './proration';
 import { studentMonthlyCharge } from './billing-amount';
+import { STUDENT_STATUS } from '../students/student-status';
 
-const ACTIVE_STUDENT = 'Active Student';
+const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
 const PENDING = 'Pending';
 /** JS Date.getDay() (0=Sunday) → the stored weekday string. */
 const WEEKDAY_BY_JS_DAY = [

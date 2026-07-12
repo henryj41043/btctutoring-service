@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Student } from '../models/student.model';
 import { StudentsModel } from '../models/students.model';
+import { ContactsModel } from '../models/contacts.model';
+import { Contact } from '../models/contact.model';
+import { OnboardingRow } from '../models/onboarding-row.model';
+import { STUDENT_STATUS } from './student-status';
 import { randomUUID } from 'crypto';
+
+/** Max keys per dynamoose batchGet request. */
+const BATCH_GET_LIMIT = 100;
 
 @Injectable()
 export class StudentsService {
@@ -22,6 +29,7 @@ export class StudentsService {
       name: student.name,
       birthday: student.birthday,
       status: student.status,
+      onboarding_complete: student.onboarding_complete,
       assigned_tutor_id: student.assigned_tutor_id,
       package: student.package,
       scholarship: student.scholarship,
@@ -105,11 +113,91 @@ export class StudentsService {
       });
   }
 
+  /**
+   * Denormalized rows for the Onboarding page: every student in `Onboarding`
+   * status joined to its family's name and onboarding dates. Filtering and the
+   * join both happen server-side so the client gets one small payload.
+   */
+  async getOnboardingStudents(): Promise<OnboardingRow[]> {
+    try {
+      const students = (await StudentsModel.scan({
+        status: { eq: STUDENT_STATUS.ONBOARDING },
+      })
+        .all()
+        .exec()) as unknown as Student[];
+
+      const contactIds = [
+        ...new Set(students.map((s) => s.contact_id).filter(Boolean)),
+      ];
+      const contactsById = await this.getContactsByIds(contactIds);
+
+      return students.map((student) =>
+        this.buildOnboardingRow(student, contactsById.get(student.contact_id)),
+      );
+    } catch (error) {
+      Logger.error((error as Error).message, error as Error);
+      return Promise.reject(error as Error);
+    }
+  }
+
+  /** Batch-fetch contacts by id (chunked to dynamoose's 100-key batchGet limit). */
+  private async getContactsByIds(ids: string[]): Promise<Map<string, Contact>> {
+    const byId = new Map<string, Contact>();
+    for (let i = 0; i < ids.length; i += BATCH_GET_LIMIT) {
+      const chunk = ids.slice(i, i + BATCH_GET_LIMIT);
+      const contacts = (await ContactsModel.batchGet(
+        chunk,
+      )) as unknown as Contact[];
+      for (const contact of contacts) {
+        if (contact && contact.id) {
+          byId.set(contact.id, contact);
+        }
+      }
+    }
+    return byId;
+  }
+
+  /** Merge a student with its family's name + onboarding dates into a table row. */
+  private buildOnboardingRow(
+    student: Student,
+    contact?: Contact,
+  ): OnboardingRow {
+    const contactName = contact
+      ? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim()
+      : '';
+    return {
+      id: student.id,
+      contact_id: student.contact_id,
+      name: student.name,
+      status: student.status,
+      onboarding_complete: student.onboarding_complete ?? false,
+      contact_name: contactName,
+      inquiry_received: contact?.inquiry_received,
+      inquiry_note_from_parent: contact?.inquiry_note_from_parent,
+      consult_date: contact?.consult_date,
+      trial_date: contact?.trial_date,
+      registration_sent: contact?.registration_sent,
+      registration_received: contact?.registration_received,
+      scholarship_name: contact?.scholarship_name,
+      scholarship_student: contact?.scholarship_student,
+      twenty_five_received: contact?.twenty_five_received,
+    };
+  }
+
   async createStudent(student: Student) {
     const newUuid: string = randomUUID();
+    const attributes = this.buildStudentAttributes(student);
+    // New students start in onboarding: the client only supplies a name, so
+    // default the two lifecycle fields here as a safety net.
+    if (attributes.status === undefined) {
+      attributes.status = STUDENT_STATUS.ONBOARDING;
+    }
+    if (attributes.onboarding_complete === undefined) {
+      attributes.onboarding_complete = false;
+    }
     const newStudent = new StudentsModel({
       id: newUuid,
-      ...this.buildStudentAttributes(student),
+      ...attributes,
     });
     return newStudent
       .save()

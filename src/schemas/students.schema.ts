@@ -9,6 +9,7 @@ export const StudentsSchema = new dynamoose.Schema({
   name: String,
   birthday: String,
   status: String,
+  onboarding_complete: Boolean,
   assigned_tutor_id: String,
   package: String,
   scholarship: Boolean,
