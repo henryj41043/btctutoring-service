@@ -33,6 +33,7 @@ describe('StudentsController', () => {
       getStudentsByContact: jest.fn(),
       getStudentsByTutor: jest.fn(),
       getStudents: jest.fn(),
+      getOnboardingStudents: jest.fn(),
       createStudent: jest.fn(),
       updateStudent: jest.fn(),
       deleteStudent: jest.fn(),
@@ -77,6 +78,20 @@ describe('StudentsController', () => {
         controller.getStudents(reqAs(tutor), 'student-1', '', ''),
       ).rejects.toThrow('Unauthorized');
       expect(service.getStudent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getOnboardingStudents (admin only)', () => {
+    it('admin -> getOnboardingStudents', async () => {
+      await controller.getOnboardingStudents(reqAs(admin));
+      expect(service.getOnboardingStudents).toHaveBeenCalled();
+    });
+
+    it('non-admin -> unauthorized', async () => {
+      await expect(
+        controller.getOnboardingStudents(reqAs(tutor)),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getOnboardingStudents).not.toHaveBeenCalled();
     });
   });
 
