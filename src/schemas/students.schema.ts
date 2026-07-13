@@ -32,6 +32,10 @@ export const StudentsSchema = new dynamoose.Schema({
   custom_sessions_per_week: Number,
   custom_session_length_min: Number,
   make_up_minutes: Number,
+  // Mid-month package change: the old package's prorated portion for the change
+  // month, applied on top of the new package's charge only in that month.
+  mid_month_prior_charge: Number,
+  mid_month_change_period: String,
   // Deprecated: replaced by package-driven scheduling. Kept so reads of
   // pre-existing records don't error.
   available_minutes: Number,

@@ -19,6 +19,7 @@ const sampleContact = (overrides: Partial<Contact> = {}): Contact =>
     email: 'ada@example.com',
     phone_number: '5551234567',
     service: 'Tutoring',
+    sibling_discount: 10,
     ...overrides,
   }) as Contact;
 
@@ -161,6 +162,7 @@ describe('ContactsService', () => {
       expect(Model).toHaveBeenCalledWith(
         expect.objectContaining({
           first_name: 'Ada',
+          sibling_discount: 10,
           availability: [
             { days: ['Mon'], start_time: '09:00', end_time: '10:00' },
           ],
@@ -240,6 +242,7 @@ describe('ContactsService', () => {
         { id: 'contact-1' },
         expect.objectContaining({
           first_name: 'Ada',
+          sibling_discount: 10,
           availability: [
             { days: ['Tue'], start_time: '11:00', end_time: '12:00' },
           ],

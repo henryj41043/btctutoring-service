@@ -31,6 +31,8 @@ export class Contact {
   charge_per_billing_cycle?: number;
   amount_to_be_paid_this_month?: number;
   billing_cycle?: string;
+  /** Percent (0–100) off the family's recurring billing when 2+ students are enrolled. */
+  sibling_discount?: number;
   cc_authorization_received?: boolean;
   twenty_five_deducted?: boolean;
   payment_one_received?: boolean;

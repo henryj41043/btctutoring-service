@@ -323,6 +323,23 @@ describe('StudentsService', () => {
       );
     });
 
+    it('persists the mid-month package-change fields', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          mid_month_prior_charge: 88.5,
+          mid_month_change_period: '2026-07',
+        }),
+      );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        expect.objectContaining({
+          mid_month_prior_charge: 88.5,
+          mid_month_change_period: '2026-07',
+        }),
+      );
+    });
+
     it('rejects when update fails', async () => {
       Model.update.mockRejectedValue(new Error('update boom'));
       await expect(service.updateStudent(sampleStudent())).rejects.toThrow(
