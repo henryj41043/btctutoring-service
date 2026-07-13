@@ -94,18 +94,45 @@ describe('NotesService', () => {
         'save boom',
       );
     });
+
+    it('saves the manual order when one is provided', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      await service.createNote(sampleNote({ order: 2 }));
+      const arg = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(arg.order).toBe(2);
+    });
   });
 
   describe('updateNote', () => {
-    it('updates and returns the note', async () => {
+    it('updates fields and removes the order when none is set (date sorting)', async () => {
       const updated = sampleNote({ message: 'Updated' });
       Model.update.mockResolvedValue(updated);
       const result = await service.updateNote(sampleNote());
-      expect(Model.update).toHaveBeenCalledWith(
-        { id: 'note-1' },
+      const arg = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(arg.$SET).toEqual(
         expect.objectContaining({ message: 'Great progress today.' }),
       );
+      expect(arg.$SET).not.toHaveProperty('order');
+      expect(arg.$REMOVE).toEqual(['order']);
       expect(result).toBe(updated);
+    });
+
+    it('persists a manual order when one is set', async () => {
+      Model.update.mockResolvedValue(sampleNote());
+      await service.updateNote(sampleNote({ order: 3 }));
+      const arg = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(arg.order).toBe(3);
+      expect(arg).not.toHaveProperty('$REMOVE');
+    });
+
+    it('removes the order when it is explicitly null', async () => {
+      Model.update.mockResolvedValue(sampleNote());
+      await service.updateNote(sampleNote({ order: null as never }));
+      const arg = Model.update.mock.calls.at(-1)![1] as { $REMOVE: string[] };
+      expect(arg.$REMOVE).toEqual(['order']);
     });
 
     it('rejects when update fails', async () => {

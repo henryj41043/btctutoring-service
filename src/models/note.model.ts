@@ -7,4 +7,6 @@ export class Note {
   recipient: string;
   recipient_id: string;
   type: string;
+  /** Manual sort position; absent means the note is date-sorted (newest first). */
+  order?: number;
 }

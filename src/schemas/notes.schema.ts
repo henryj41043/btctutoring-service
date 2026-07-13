@@ -12,4 +12,5 @@ export const NotesSchema = new dynamoose.Schema({
   recipient: String,
   recipient_id: String,
   type: String,
+  order: Number,
 });
