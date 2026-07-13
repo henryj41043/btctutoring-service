@@ -74,6 +74,7 @@ export class NotesService {
       recipient: note.recipient,
       recipient_id: note.recipient_id,
       type: note.type,
+      order: note.order,
     });
     return newNote
       .save()
@@ -90,19 +91,26 @@ export class NotesService {
   }
 
   async updateNote(note: Note) {
+    const base = {
+      message: note.message,
+      date_time: note.date_time,
+      author: note.author,
+      author_id: note.author_id,
+      recipient: note.recipient,
+      recipient_id: note.recipient_id,
+      type: note.type,
+    };
+    // A null/absent order means "revert to date sorting" — remove the attribute
+    // rather than writing null (dynamoose rejects null on a typed field).
+    const update =
+      note.order === null || note.order === undefined
+        ? { $SET: base, $REMOVE: ['order'] }
+        : { ...base, order: note.order };
     return NotesModel.update(
       {
         id: note.id,
       },
-      {
-        message: note.message,
-        date_time: note.date_time,
-        author: note.author,
-        author_id: note.author_id,
-        recipient: note.recipient,
-        recipient_id: note.recipient_id,
-        type: note.type,
-      },
+      update,
     )
       .then((updatedNote) => {
         return updatedNote;
