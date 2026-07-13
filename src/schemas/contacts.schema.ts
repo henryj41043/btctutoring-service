@@ -15,6 +15,7 @@ export const ContactsSchema = new dynamoose.Schema({
   charge_per_billing_cycle: Number,
   amount_to_be_paid_this_month: Number,
   billing_cycle: String,
+  sibling_discount: Number,
   cc_authorization_received: Boolean,
   twenty_five_deducted: Boolean,
   payment_one_received: Boolean,

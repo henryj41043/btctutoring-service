@@ -133,6 +133,53 @@ describe('AutoRenewService', () => {
     expect(result.billingRecords).toBe(0);
   });
 
+  it('applies the sibling discount when 2+ students are enrolled', async () => {
+    students.getStudents.mockResolvedValue([
+      student({ id: 's-1' }),
+      student({ id: 's-2' }),
+    ]);
+    contacts.getContacts.mockResolvedValue([
+      parent({ sibling_discount: 10 }),
+      tutor(),
+    ]);
+    await service.runAutoRenew(july);
+    // 2 × $362 = $724, less 10% = $651.60.
+    expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 651.6 }),
+    );
+  });
+
+  it('does not apply the sibling discount to an only child', async () => {
+    contacts.getContacts.mockResolvedValue([
+      parent({ sibling_discount: 10 }),
+      tutor(),
+    ]);
+    await service.runAutoRenew(july);
+    expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 362 }),
+    );
+  });
+
+  it('does not discount when only one of two students is enrolled', async () => {
+    students.getStudents.mockResolvedValue([
+      student({ id: 's-1' }),
+      student({
+        id: 's-2',
+        package: undefined,
+        auto_renew: false,
+        schedule: undefined,
+      }),
+    ]);
+    contacts.getContacts.mockResolvedValue([
+      parent({ sibling_discount: 10 }),
+      tutor(),
+    ]);
+    await service.runAutoRenew(july);
+    expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 362 }),
+    );
+  });
+
   it('the @Cron handler runs the renewal for the current month', async () => {
     await service.handleMonthlyRenewal();
     expect(billing.acquireLock).toHaveBeenCalled();

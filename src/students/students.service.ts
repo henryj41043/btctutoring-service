@@ -40,6 +40,8 @@ export class StudentsService {
       custom_sessions_per_week: student.custom_sessions_per_week,
       custom_session_length_min: student.custom_session_length_min,
       make_up_minutes: student.make_up_minutes,
+      mid_month_prior_charge: student.mid_month_prior_charge,
+      mid_month_change_period: student.mid_month_change_period,
     };
 
     for (const key of Object.keys(candidate)) {

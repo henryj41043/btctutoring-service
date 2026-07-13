@@ -22,6 +22,10 @@ export class Student {
   custom_sessions_per_week?: number;
   custom_session_length_min?: number;
   make_up_minutes: number;
+  /** Old package's prorated portion for a mid-month package change month. */
+  mid_month_prior_charge?: number;
+  /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
+  mid_month_change_period?: string;
   /** @deprecated Replaced by package-driven scheduling; retained for old records. */
   available_minutes?: number;
 }

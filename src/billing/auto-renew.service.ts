@@ -8,9 +8,9 @@ import { BillingService } from './billing.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
-import { round2 } from './package-config';
+import { resolvePackageDef, round2 } from './package-config';
 import { semiMonthlySplit } from './proration';
-import { studentMonthlyCharge } from './billing-amount';
+import { studentMonthlyCharge, siblingDiscountedTotal } from './billing-amount';
 import { STUDENT_STATUS } from '../students/student-status';
 
 const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
@@ -117,11 +117,19 @@ export class AutoRenewService {
       const contactStudents = activeStudents.filter(
         (s) => s.contact_id === contactId,
       );
-      const total = round2(
+      const preDiscount = round2(
         contactStudents.reduce(
           (sum, s) => sum + studentMonthlyCharge(s, year, month),
           0,
         ),
+      );
+      const enrolledCount = contactStudents.filter((s) =>
+        this.isEnrolled(s),
+      ).length;
+      const total = siblingDiscountedTotal(
+        preDiscount,
+        contact.sibling_discount,
+        enrolledCount,
       );
       if (total <= 0) continue;
 
@@ -153,6 +161,17 @@ export class AutoRenewService {
       `Auto-renew ${this.monthKey(year, month)}: ${sessionsCreated} session(s), ${billingRecords} billing record(s).`,
     );
     return { sessionsCreated, billingRecords, skipped: false };
+  }
+
+  /** True when a student has a resolvable package — i.e. is enrolled and billable. */
+  private isEnrolled(student: Student): boolean {
+    return (
+      resolvePackageDef(student.package, {
+        monthlyCost: student.custom_monthly_cost,
+        sessionsPerWeek: student.custom_sessions_per_week,
+        sessionLengthMin: student.custom_session_length_min,
+      }) !== null
+    );
   }
 
   private async createRecord(
