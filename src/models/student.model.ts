@@ -4,6 +4,12 @@ export class ScheduleSlot {
   end_time: string; // 'HH:mm'
 }
 
+/** A dated lot of remaining make-up minutes; expires 90 days after earned_date. */
+export class MakeupBatch {
+  minutes: number;
+  earned_date: string; // ISO
+}
+
 export class Student {
   id?: string;
   contact_id: string;
@@ -22,6 +28,10 @@ export class Student {
   custom_sessions_per_week?: number;
   custom_session_length_min?: number;
   make_up_minutes: number;
+  /** Dated lots of remaining make-up minutes (source of truth for the balance). */
+  make_up_batches?: MakeupBatch[];
+  /** When true, make-up minutes never expire. */
+  make_up_never_expire?: boolean;
   /** Old package's prorated portion for a mid-month package change month. */
   mid_month_prior_charge?: number;
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */

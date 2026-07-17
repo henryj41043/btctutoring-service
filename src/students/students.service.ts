@@ -23,6 +23,9 @@ export class StudentsService {
     const schedule = Array.isArray(student.schedule)
       ? student.schedule.filter((s) => s && typeof s === 'object')
       : undefined;
+    const makeUpBatches = Array.isArray(student.make_up_batches)
+      ? student.make_up_batches.filter((b) => b && typeof b === 'object')
+      : undefined;
 
     const candidate: Record<string, unknown> = {
       contact_id: student.contact_id,
@@ -40,6 +43,9 @@ export class StudentsService {
       custom_sessions_per_week: student.custom_sessions_per_week,
       custom_session_length_min: student.custom_session_length_min,
       make_up_minutes: student.make_up_minutes,
+      make_up_batches:
+        makeUpBatches && makeUpBatches.length > 0 ? makeUpBatches : undefined,
+      make_up_never_expire: student.make_up_never_expire,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
     };
@@ -55,6 +61,14 @@ export class StudentsService {
   /** True when the client sent an explicitly empty schedule, signalling a clear. */
   private isScheduleCleared(student: Student): boolean {
     return Array.isArray(student.schedule) && student.schedule.length === 0;
+  }
+
+  /** True when the client sent an explicitly empty make-up batch list (all consumed/expired). */
+  private isMakeupBatchesCleared(student: Student): boolean {
+    return (
+      Array.isArray(student.make_up_batches) &&
+      student.make_up_batches.length === 0
+    );
   }
 
   async getStudent(id: string) {
@@ -217,13 +231,15 @@ export class StudentsService {
 
   async updateStudent(student: Student) {
     const attributes = this.buildStudentAttributes(student);
-    // An explicitly empty schedule means "clear the recurring schedule". dynamoose
-    // only $SETs provided keys (and buildStudentAttributes drops empty arrays), so
-    // an empty array would otherwise leave the old schedule in place — issue an
+    // An explicitly empty schedule/batch list means "clear it". dynamoose only
+    // $SETs provided keys (and buildStudentAttributes drops empty arrays), so an
+    // empty array would otherwise leave the old value in place — issue an
     // explicit $REMOVE to actually drop it.
-    const update = this.isScheduleCleared(student)
-      ? { $SET: attributes, $REMOVE: ['schedule'] }
-      : attributes;
+    const remove: string[] = [];
+    if (this.isScheduleCleared(student)) remove.push('schedule');
+    if (this.isMakeupBatchesCleared(student)) remove.push('make_up_batches');
+    const update =
+      remove.length > 0 ? { $SET: attributes, $REMOVE: remove } : attributes;
     return StudentsModel.update(
       {
         id: student.id,
