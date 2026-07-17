@@ -340,6 +340,38 @@ describe('StudentsService', () => {
       );
     });
 
+    it('persists make-up batches (filtering malformed entries) and the never-expire flag', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          make_up_batches: [
+            { minutes: 30, earned_date: '2026-07-01T00:00:00Z' },
+            null as never,
+          ],
+          make_up_never_expire: true,
+        }),
+      );
+      const attrs = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(attrs.make_up_batches).toEqual([
+        { minutes: 30, earned_date: '2026-07-01T00:00:00Z' },
+      ]);
+      expect(attrs.make_up_never_expire).toBe(true);
+    });
+
+    it('issues a $REMOVE to clear an explicitly emptied make-up batch list', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(sampleStudent({ make_up_batches: [] }));
+      const update = Model.update.mock.calls.at(-1)![1] as {
+        $SET?: Record<string, unknown>;
+        $REMOVE?: string[];
+      };
+      expect(update.$REMOVE).toEqual(['make_up_batches']);
+      expect(update.$SET).not.toHaveProperty('make_up_batches');
+    });
+
     it('rejects when update fails', async () => {
       Model.update.mockRejectedValue(new Error('update boom'));
       await expect(service.updateStudent(sampleStudent())).rejects.toThrow(

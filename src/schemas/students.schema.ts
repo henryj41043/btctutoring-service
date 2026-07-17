@@ -32,6 +32,22 @@ export const StudentsSchema = new dynamoose.Schema({
   custom_sessions_per_week: Number,
   custom_session_length_min: Number,
   make_up_minutes: Number,
+  // Dated lots of remaining make-up minutes; each expires 90 days after
+  // earned_date unless make_up_never_expire is set. Source of truth for the
+  // make-up balance (make_up_minutes is a denormalized snapshot).
+  make_up_batches: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          minutes: Number,
+          earned_date: String,
+        },
+      },
+    ],
+  },
+  make_up_never_expire: Boolean,
   // Mid-month package change: the old package's prorated portion for the change
   // month, applied on top of the new package's charge only in that month.
   mid_month_prior_charge: Number,
