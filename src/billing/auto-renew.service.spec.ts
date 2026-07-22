@@ -80,6 +80,26 @@ describe('AutoRenewService', () => {
     expect(result.sessionsCreated).toBe(9);
   });
 
+  it('pins session times to Eastern wall time in summer (EDT, UTC-4)', async () => {
+    await service.runAutoRenew(july);
+    const created = sessions.createSessions.mock.calls[0][0];
+    // First Monday of July 2026 is the 6th; 10:00 AM EDT = 14:00Z. Regression
+    // for the cron generating in the container's UTC clock (4-5h early).
+    expect(created[0].start_datetime).toBe('2026-07-06T14:00:00.000Z');
+    expect(created[0].end_datetime).toBe('2026-07-06T14:30:00.000Z');
+  });
+
+  it('pins session times to Eastern wall time in winter (EST, UTC-5)', async () => {
+    students.getStudents.mockResolvedValue([
+      student({ package_start_date: '2025-12-01T00:00:00' }),
+    ]);
+    await service.runAutoRenew(new Date(2026, 0, 1));
+    const created = sessions.createSessions.mock.calls[0][0];
+    // First Monday of January 2026 is the 5th; 10:00 AM EST = 15:00Z.
+    expect(created[0].start_datetime).toBe('2026-01-05T15:00:00.000Z');
+    expect(created[0].end_datetime).toBe('2026-01-05T15:30:00.000Z');
+  });
+
   it('creates a single monthly billing record at the full cost', async () => {
     const result = await service.runAutoRenew(july);
     expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledTimes(1);
