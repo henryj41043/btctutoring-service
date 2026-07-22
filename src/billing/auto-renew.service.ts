@@ -11,6 +11,7 @@ import { Session, SessionType } from '../models/session.model';
 import { resolvePackageDef, round2 } from './package-config';
 import { semiMonthlySplit } from './proration';
 import { studentMonthlyCharge, siblingDiscountedTotal } from './billing-amount';
+import { easternSlotToUtc } from './eastern-time';
 import { STUDENT_STATUS } from '../students/student-status';
 
 const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
@@ -205,8 +206,21 @@ export class AutoRenewService {
         if (WEEKDAY_BY_JS_DAY[date.getDay()] !== slot.weekday) continue;
         sessions.push({
           type: SessionType.TUTORING,
-          start_datetime: this.atTime(date, slot.start_time).toISOString(),
-          end_datetime: this.atTime(date, slot.end_time).toISOString(),
+          // Slot times are Eastern wall times; the container clock is UTC, so
+          // the conversion must be explicit (ambient setHours generated the
+          // 4-5h-early sessions this replaces).
+          start_datetime: easternSlotToUtc(
+            year,
+            month,
+            day,
+            slot.start_time,
+          ).toISOString(),
+          end_datetime: easternSlotToUtc(
+            year,
+            month,
+            day,
+            slot.end_time,
+          ).toISOString(),
           status: PENDING,
           notes: '',
           student_id: student.id,
@@ -218,13 +232,6 @@ export class AutoRenewService {
       }
     }
     return sessions;
-  }
-
-  private atTime(date: Date, time: string): Date {
-    const [h, m] = (time ?? '').split(':').map(Number);
-    const d = new Date(date);
-    d.setHours(h || 0, m || 0, 0, 0);
-    return d;
   }
 
   private periodKey(year: number, month: number, day: number): string {
