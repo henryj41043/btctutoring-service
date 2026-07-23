@@ -156,6 +156,27 @@ export class StudentsService {
     }
   }
 
+  /**
+   * Denormalizes each student with their family's (contact's) display name so
+   * list views (e.g. the roster) can show a Parent column without a
+   * client-side join. Mirrors the onboarding view's server-side join.
+   */
+  async withContactNames(
+    students: Student[],
+  ): Promise<(Student & { contact_name: string })[]> {
+    const contactIds = [
+      ...new Set(students.map((s) => s.contact_id).filter(Boolean)),
+    ];
+    const contactsById = await this.getContactsByIds(contactIds);
+    return students.map((student) => {
+      const contact = contactsById.get(student.contact_id);
+      const contactName = contact
+        ? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim()
+        : '';
+      return Object.assign({}, student, { contact_name: contactName });
+    });
+  }
+
   /** Batch-fetch contacts by id (chunked to dynamoose's 100-key batchGet limit). */
   private async getContactsByIds(ids: string[]): Promise<Map<string, Contact>> {
     const byId = new Map<string, Contact>();
