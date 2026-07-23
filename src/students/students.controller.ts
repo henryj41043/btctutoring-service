@@ -42,18 +42,31 @@ export class StudentsController {
     @Query('id') id: string,
     @Query('contact') contactId: string,
     @Query('tutor') tutorId: string,
+    @Query('include') include: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const isAdmin: boolean = user.groups.includes('Admins');
     if (isAdmin) {
+      // ?include=contact_name denormalizes each student with the family's
+      // display name (roster views), skipping a client-side join.
+      const withNames = include === 'contact_name';
       if (id) {
         return this.studentsService.getStudent(id);
       } else if (contactId) {
         return this.studentsService.getStudentsByContact(contactId);
       } else if (tutorId) {
-        return this.studentsService.getStudentsByTutor(tutorId);
+        const students = (await this.studentsService.getStudentsByTutor(
+          tutorId,
+        )) as unknown as Student[];
+        return withNames
+          ? this.studentsService.withContactNames(students)
+          : students;
       } else {
-        return this.studentsService.getStudents();
+        const students =
+          (await this.studentsService.getStudents()) as unknown as Student[];
+        return withNames
+          ? this.studentsService.withContactNames(students)
+          : students;
       }
     } else {
       Logger.error('User not authorized to get students');

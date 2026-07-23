@@ -34,6 +34,7 @@ describe('StudentsController', () => {
       getStudentsByTutor: jest.fn(),
       getStudents: jest.fn(),
       getOnboardingStudents: jest.fn(),
+      withContactNames: jest.fn(),
       createStudent: jest.fn(),
       updateStudent: jest.fn(),
       deleteStudent: jest.fn(),
@@ -52,30 +53,72 @@ describe('StudentsController', () => {
 
   describe('getStudents routing (admin only)', () => {
     it('admin + id -> getStudent', async () => {
-      await controller.getStudents(reqAs(admin), 'student-1', '', '');
+      await controller.getStudents(reqAs(admin), 'student-1', '', '', '');
       expect(service.getStudent).toHaveBeenCalledWith('student-1');
     });
 
     it('admin + contact -> getStudentsByContact', async () => {
-      await controller.getStudents(reqAs(admin), '', 'contact-1', '');
+      await controller.getStudents(reqAs(admin), '', 'contact-1', '', '');
       expect(service.getStudentsByContact).toHaveBeenCalledWith('contact-1');
     });
 
     it('admin + tutor -> getStudentsByTutor', async () => {
-      await controller.getStudents(reqAs(admin), '', '', 'tutor@example.com');
+      service.getStudentsByTutor.mockResolvedValue([] as never);
+      await controller.getStudents(
+        reqAs(admin),
+        '',
+        '',
+        'tutor@example.com',
+        '',
+      );
       expect(service.getStudentsByTutor).toHaveBeenCalledWith(
         'tutor@example.com',
       );
+      expect(service.withContactNames).not.toHaveBeenCalled();
     });
 
     it('admin + no params -> getStudents', async () => {
-      await controller.getStudents(reqAs(admin), '', '', '');
+      service.getStudents.mockResolvedValue([] as never);
+      await controller.getStudents(reqAs(admin), '', '', '', '');
       expect(service.getStudents).toHaveBeenCalled();
+      expect(service.withContactNames).not.toHaveBeenCalled();
+    });
+
+    it('include=contact_name enriches the all-students listing', async () => {
+      const students = [student];
+      const enriched = [{ ...student, contact_name: 'Ann Lee' }];
+      service.getStudents.mockResolvedValue(students as never);
+      service.withContactNames.mockResolvedValue(enriched as never);
+      const result = await controller.getStudents(
+        reqAs(admin),
+        '',
+        '',
+        '',
+        'contact_name',
+      );
+      expect(service.withContactNames).toHaveBeenCalledWith(students);
+      expect(result).toEqual(enriched);
+    });
+
+    it('include=contact_name enriches the by-tutor listing', async () => {
+      const students = [student];
+      const enriched = [{ ...student, contact_name: 'Ann Lee' }];
+      service.getStudentsByTutor.mockResolvedValue(students as never);
+      service.withContactNames.mockResolvedValue(enriched as never);
+      const result = await controller.getStudents(
+        reqAs(admin),
+        '',
+        '',
+        'tutor@example.com',
+        'contact_name',
+      );
+      expect(service.withContactNames).toHaveBeenCalledWith(students);
+      expect(result).toEqual(enriched);
     });
 
     it('non-admin -> unauthorized', async () => {
       await expect(
-        controller.getStudents(reqAs(tutor), 'student-1', '', ''),
+        controller.getStudents(reqAs(tutor), 'student-1', '', '', ''),
       ).rejects.toThrow('Unauthorized');
       expect(service.getStudent).not.toHaveBeenCalled();
     });

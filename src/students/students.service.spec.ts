@@ -157,6 +157,51 @@ describe('StudentsService', () => {
     });
   });
 
+  describe('withContactNames', () => {
+    beforeEach(() => {
+      Contacts.batchGet.mockReset();
+    });
+
+    it('joins each student to their family display name (deduped lookup)', async () => {
+      Contacts.batchGet.mockResolvedValue([
+        { id: 'c1', first_name: 'Ann', last_name: 'Lee' },
+        // last_name absent — trimmed, no trailing space.
+        { id: 'c2', first_name: 'Bob' },
+      ]);
+      const rows = await service.withContactNames([
+        sampleStudent({ id: 's1', contact_id: 'c1', name: 'Kid One' }),
+        sampleStudent({ id: 's2', contact_id: 'c1', name: 'Kid Two' }), // sibling — same contact
+        sampleStudent({ id: 's3', contact_id: 'c2', name: 'Kid Three' }),
+        sampleStudent({ id: 's4', contact_id: '' as never, name: 'No Family' }),
+      ]);
+      // Sibling ids deduped before the batchGet; falsy ids dropped.
+      expect(Contacts.batchGet).toHaveBeenCalledWith(['c1', 'c2']);
+      expect(rows.map((r) => r.contact_name)).toEqual([
+        'Ann Lee',
+        'Ann Lee',
+        'Bob',
+        '',
+      ]);
+      // The student's own fields survive the merge.
+      expect(rows[0].name).toBe('Kid One');
+      expect(rows[0].id).toBe('s1');
+    });
+
+    it('returns an empty contact_name when the contact is missing', async () => {
+      Contacts.batchGet.mockResolvedValue([]);
+      const rows = await service.withContactNames([
+        sampleStudent({ id: 's1', contact_id: 'c-gone' }),
+      ]);
+      expect(rows[0].contact_name).toBe('');
+    });
+
+    it('skips the lookup entirely for an empty list', async () => {
+      const rows = await service.withContactNames([]);
+      expect(rows).toEqual([]);
+      expect(Contacts.batchGet).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getOnboardingStudents', () => {
     beforeEach(() => {
       Contacts.batchGet.mockReset();
