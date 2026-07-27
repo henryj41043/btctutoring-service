@@ -11,6 +11,7 @@ import { SessionsModule } from './sessions/sessions.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { StudentsModule } from './students/students.module';
 import { NotesModule } from './notes/notes.module';
+import { RemindersModule } from './reminders/reminders.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
 
@@ -25,6 +26,7 @@ import { BillingModule } from './billing/billing.module';
     ContactsModule,
     StudentsModule,
     NotesModule,
+    RemindersModule,
     NotificationsModule,
     BillingModule,
   ],

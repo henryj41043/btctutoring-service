@@ -144,6 +144,23 @@ describe('ContactsService', () => {
     });
   });
 
+  describe('getAdminContacts', () => {
+    it('scans for Admins user_group and paginates fully', async () => {
+      const admins = [sampleContact({ user_group: 'Admins' })];
+      const chain = scanResolves(Model, admins);
+      await expect(service.getAdminContacts()).resolves.toBe(admins);
+      expect(Model.scan).toHaveBeenCalledWith({
+        user_group: { eq: 'Admins' },
+      });
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getAdminContacts()).rejects.toThrow('scan boom');
+    });
+  });
+
   describe('createContact', () => {
     it('saves a new contact and returns a generated id', async () => {
       scanResolves(Model, []); // duplicate-email check finds nothing
