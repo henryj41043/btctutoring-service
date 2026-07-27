@@ -32,6 +32,8 @@ export class Student {
   make_up_batches?: MakeupBatch[];
   /** When true, make-up minutes never expire. */
   make_up_never_expire?: boolean;
+  /** Extra tutor planning minutes credited per counted session (payroll). */
+  extra_planning_minutes?: number;
   /** Old package's prorated portion for a mid-month package change month. */
   mid_month_prior_charge?: number;
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */

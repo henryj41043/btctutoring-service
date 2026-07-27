@@ -406,6 +406,18 @@ describe('StudentsService', () => {
       expect(attrs.make_up_never_expire).toBe(true);
     });
 
+    it('persists extra_planning_minutes (payroll per-session credit)', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({ extra_planning_minutes: 15 }),
+      );
+      const attrs = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(attrs.extra_planning_minutes).toBe(15);
+    });
+
     it('issues a $REMOVE to clear an explicitly emptied make-up batch list', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ make_up_batches: [] }));
