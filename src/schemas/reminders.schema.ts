@@ -14,6 +14,8 @@ export const RemindersSchema = new dynamoose.Schema({
     type: Array,
     schema: [String],
   },
+  // Optional linked contact the reminder is about.
+  contact_id: String,
   // Set once the morning-of digest has been sent — the fire-once flag.
   sent_at: String,
   created_by: String,

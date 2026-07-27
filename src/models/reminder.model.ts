@@ -10,6 +10,8 @@ export class Reminder {
   recipient_ids?: string[];
   /** ISO timestamp set once the morning-of email has been sent (fire once). */
   sent_at?: string;
+  /** Optional linked contact the reminder is about (jump-off in the UI). */
+  contact_id?: string;
   /** Contact id of the admin who created the reminder. */
   created_by?: string;
 }

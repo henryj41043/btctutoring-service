@@ -107,7 +107,29 @@ describe('RemindersService', () => {
         expect.objectContaining({ title: 'Call John' }),
       );
       expect(update.$SET.sent_at).toBeUndefined();
+      expect(update.$REMOVE).toContain('sent_at');
+    });
+
+    it('persists a contact link on create and update', async () => {
+      Model.__save.mockResolvedValue({});
+      await service.createReminder(dueReminder({ contact_id: 'c-9' }));
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({ contact_id: 'c-9' }),
+      );
+
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({ id: 'rem-9', contact_id: 'c-9' }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.contact_id).toBe('c-9');
       expect(update.$REMOVE).toEqual(['sent_at']);
+    });
+
+    it('clears the contact link when absent on update', async () => {
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({ id: 'rem-9' }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.contact_id).toBeUndefined();
+      expect(update.$REMOVE).toEqual(['sent_at', 'contact_id']);
     });
 
     it('propagates update failures', async () => {
