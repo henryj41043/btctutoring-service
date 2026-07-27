@@ -6,4 +6,9 @@
 export const STUDENT_STATUS = {
   ONBOARDING: 'Onboarding',
   ACTIVE_STUDENT: 'Active Student',
+  PAST_STUDENT: 'Past Student',
+  // A family that stopped responding during onboarding — the escape hatch
+  // that keeps students from being trapped in Onboarding forever. Inert for
+  // billing/auto-renew/rosters (those gate on ACTIVE_STUDENT).
+  MIA: 'MIA',
 } as const;
