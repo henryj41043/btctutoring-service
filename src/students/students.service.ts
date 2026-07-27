@@ -46,6 +46,7 @@ export class StudentsService {
       make_up_batches:
         makeUpBatches && makeUpBatches.length > 0 ? makeUpBatches : undefined,
       make_up_never_expire: student.make_up_never_expire,
+      extra_planning_minutes: student.extra_planning_minutes,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
     };
