@@ -38,6 +38,7 @@ export class RemindersService {
       date: reminder.date,
       all_admins: reminder.all_admins ?? false,
       recipient_ids: reminder.recipient_ids ?? [],
+      contact_id: reminder.contact_id,
       created_by: reminder.created_by,
     });
     return newReminder
@@ -65,9 +66,17 @@ export class RemindersService {
       all_admins: reminder.all_admins ?? false,
       recipient_ids: reminder.recipient_ids ?? [],
     };
+    // A cleared/absent contact link removes the attribute (dynamoose rejects
+    // null on a typed field).
+    const removals = ['sent_at'];
+    if (reminder.contact_id) {
+      base.contact_id = reminder.contact_id;
+    } else {
+      removals.push('contact_id');
+    }
     return RemindersModel.update(
       { id: reminder.id },
-      { $SET: base, $REMOVE: ['sent_at'] },
+      { $SET: base, $REMOVE: removals },
     )
       .then((updated) => {
         return updated;
