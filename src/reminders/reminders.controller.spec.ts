@@ -1,0 +1,87 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import express from 'express';
+import { RemindersController } from './reminders.controller';
+import { RemindersService } from './reminders.service';
+import { User } from '../models/user.model';
+import { Reminder } from '../models/reminder.model';
+
+const admin: User = {
+  username: 'admin',
+  email: 'admin@example.com',
+  groups: ['Admins'],
+  contact: 'c-admin',
+};
+const tutor: User = {
+  username: 'tutor',
+  email: 'tutor@example.com',
+  groups: ['Tutors'],
+  contact: 'c-tutor',
+};
+
+const reqAs = (user: User): express.Request =>
+  ({ user }) as unknown as express.Request;
+
+const reminder = { id: 'rem-1', title: 'Call John' } as Reminder;
+
+describe('RemindersController', () => {
+  let controller: RemindersController;
+  let service: jest.Mocked<RemindersService>;
+
+  beforeEach(async () => {
+    const serviceMock: Partial<jest.Mocked<RemindersService>> = {
+      getReminders: jest.fn(),
+      createReminder: jest.fn(),
+      updateReminder: jest.fn(),
+      deleteReminder: jest.fn(),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [RemindersController],
+      providers: [{ provide: RemindersService, useValue: serviceMock }],
+    }).compile();
+    controller = module.get(RemindersController);
+    service = module.get(RemindersService);
+  });
+
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
+  });
+
+  it('admin can list reminders', async () => {
+    await controller.getReminders(reqAs(admin));
+    expect(service.getReminders).toHaveBeenCalled();
+  });
+
+  it('admin can create a reminder', async () => {
+    await controller.createReminder(reqAs(admin), reminder);
+    expect(service.createReminder).toHaveBeenCalledWith(reminder);
+  });
+
+  it('admin can update a reminder', async () => {
+    await controller.updateReminder(reqAs(admin), reminder);
+    expect(service.updateReminder).toHaveBeenCalledWith(reminder);
+  });
+
+  it('admin can delete a reminder', async () => {
+    await controller.deleteReminder(reqAs(admin), 'rem-1');
+    expect(service.deleteReminder).toHaveBeenCalledWith('rem-1');
+  });
+
+  it('non-admin is rejected on every route', async () => {
+    await expect(controller.getReminders(reqAs(tutor))).rejects.toThrow(
+      'Unauthorized',
+    );
+    await expect(
+      controller.createReminder(reqAs(tutor), reminder),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.updateReminder(reqAs(tutor), reminder),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.deleteReminder(reqAs(tutor), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    expect(service.getReminders).not.toHaveBeenCalled();
+    expect(service.createReminder).not.toHaveBeenCalled();
+    expect(service.updateReminder).not.toHaveBeenCalled();
+    expect(service.deleteReminder).not.toHaveBeenCalled();
+  });
+});

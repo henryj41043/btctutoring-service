@@ -79,6 +79,22 @@ export class ContactsService {
     }
   }
 
+  /** Admin users (user_group=Admins) — reminder digest recipients. */
+  async getAdminContacts() {
+    return ContactsModel.scan({
+      user_group: { eq: 'Admins' },
+    })
+      .all()
+      .exec()
+      .then((contacts) => {
+        return contacts;
+      })
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
   /** Current staff only (service=Hiring, status=Staff) — the tutor dropdowns. */
   async getStaffContacts() {
     return ContactsModel.scan({
