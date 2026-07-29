@@ -38,10 +38,21 @@ describe('NotesService', () => {
   });
 
   describe('read queries', () => {
-    it('getNote scans by id', async () => {
-      scanResolves(Model, [sampleNote()]);
-      await service.getNote('note-1');
-      expect(Model.scan).toHaveBeenCalledWith({ id: { eq: 'note-1' } });
+    it('getNote gets by key and wraps the item in an array', async () => {
+      const note = sampleNote();
+      Model.get.mockResolvedValue(note);
+      await expect(service.getNote('note-1')).resolves.toEqual([note]);
+      expect(Model.get).toHaveBeenCalledWith('note-1');
+    });
+
+    it('getNote returns an empty array for a missing id', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.getNote('missing')).resolves.toEqual([]);
+    });
+
+    it('getNote rejects when the get fails', async () => {
+      Model.get.mockRejectedValue(new Error('get boom'));
+      await expect(service.getNote('x')).rejects.toThrow('get boom');
     });
 
     it('getNotesByAuthor scans by author_id', async () => {
@@ -67,7 +78,6 @@ describe('NotesService', () => {
     });
 
     it.each([
-      ['getNote', () => service.getNote('x')],
       ['getNotesByAuthor', () => service.getNotesByAuthor('x')],
       ['getNotesByRecipient', () => service.getNotesByRecipient('x')],
       ['getNotes', () => service.getNotes()],

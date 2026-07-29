@@ -15,13 +15,10 @@ export class ContactsService {
   constructor(private readonly documentClient: DynamoDBDocumentClient) {}
 
   async getContact(id: string) {
-    return ContactsModel.scan({
-      id: { eq: id },
-    })
-      .all()
-      .exec()
-      .then((contacts) => {
-        return contacts;
+    // Keyed GetItem; array-of-one preserves the old scan-result shape.
+    return ContactsModel.get(id)
+      .then((contact) => {
+        return contact ? [contact] : [];
       })
       .catch((error: Error) => {
         Logger.error(error.message, error);
@@ -57,7 +54,7 @@ export class ContactsService {
         const page = (await this.documentClient.send(
           new ScanCommand({
             TableName: 'BTCTutoring-Contacts-Table',
-            ProjectionExpression: '#id, #fn, #ln, #em, #ph, #sv',
+            ProjectionExpression: '#id, #fn, #ln, #em, #ph, #sv, #ug',
             ExpressionAttributeNames: {
               '#id': 'id',
               '#fn': 'first_name',
@@ -65,6 +62,7 @@ export class ContactsService {
               '#em': 'email',
               '#ph': 'phone_number',
               '#sv': 'service',
+              '#ug': 'user_group',
             },
             ExclusiveStartKey: lastKey,
           }),

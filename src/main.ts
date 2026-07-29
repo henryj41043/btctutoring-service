@@ -3,12 +3,14 @@ import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import compression from 'compression';
+import { TimingInterceptor } from './interceptors/timing.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   // Gzip responses — collection endpoints ship hundreds of KB of JSON that
   // compresses ~10x, which dominates load time on slower connections.
   app.use(compression());
+  app.useGlobalInterceptors(new TimingInterceptor());
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
   app.enableCors({
     origin: ['http://localhost:4200', 'https://btchub.bitshiftstudio.io'],
