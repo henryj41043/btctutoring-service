@@ -48,16 +48,16 @@ describe('Contacts (integration)', () => {
   });
 
   it('admin fetches a single contact by id', async () => {
-    scanResolves(Model, [{ id: 'c-1' }]);
+    Model.get.mockResolvedValue({ id: 'c-1' });
     const res = await request(server())
       .get('/contacts?id=c-1')
       .set('x-test-role', 'admin');
     expect(res.status).toBe(200);
-    expect(Model.scan).toHaveBeenCalledWith({ id: { eq: 'c-1' } });
+    expect(Model.get).toHaveBeenCalledWith('c-1');
   });
 
   it('tutor may fetch their own contact', async () => {
-    scanResolves(Model, [{ id: 'contact-tutor' }]);
+    Model.get.mockResolvedValue({ id: 'contact-tutor' });
     const res = await request(server())
       .get('/contacts?id=contact-tutor')
       .set('x-test-role', 'tutor');
@@ -70,7 +70,7 @@ describe('Contacts (integration)', () => {
       .set('x-test-role', 'tutor');
     // The controller throws ForbiddenException -> 403.
     expect(res.status).toBe(403);
-    expect(Model.scan).not.toHaveBeenCalled();
+    expect(Model.get).not.toHaveBeenCalled();
   });
 
   it('admin creates a contact', async () => {

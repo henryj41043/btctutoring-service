@@ -6,13 +6,10 @@ import { Note } from '../models/note.model';
 @Injectable()
 export class NotesService {
   async getNote(id: string) {
-    return NotesModel.scan({
-      id: { eq: id },
-    })
-      .all()
-      .exec()
+    // Keyed GetItem; array-of-one preserves the old scan-result shape.
+    return NotesModel.get(id)
       .then((note) => {
-        return note;
+        return note ? [note] : [];
       })
       .catch((error: Error) => {
         Logger.error(error.message, error);

@@ -45,10 +45,23 @@ describe('StudentsService', () => {
   });
 
   describe('read queries', () => {
-    it('getStudent scans by id', async () => {
-      scanResolves(Model, [sampleStudent()]);
-      await service.getStudent('student-1');
-      expect(Model.scan).toHaveBeenCalledWith({ id: { eq: 'student-1' } });
+    it('getStudent gets by key and wraps the item in an array', async () => {
+      const student = sampleStudent();
+      Model.get.mockResolvedValue(student);
+      await expect(service.getStudent('student-1')).resolves.toEqual([
+        student,
+      ]);
+      expect(Model.get).toHaveBeenCalledWith('student-1');
+    });
+
+    it('getStudent returns an empty array for a missing id', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.getStudent('missing')).resolves.toEqual([]);
+    });
+
+    it('getStudent rejects when the get fails', async () => {
+      Model.get.mockRejectedValue(new Error('get boom'));
+      await expect(service.getStudent('x')).rejects.toThrow('get boom');
     });
 
     it('getStudentsByContact scans by contact_id', async () => {
@@ -74,7 +87,6 @@ describe('StudentsService', () => {
     });
 
     it.each([
-      ['getStudent', () => service.getStudent('x')],
       ['getStudentsByContact', () => service.getStudentsByContact('x')],
       ['getStudentsByTutor', () => service.getStudentsByTutor('x')],
       ['getStudents', () => service.getStudents()],

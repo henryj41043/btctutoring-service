@@ -43,18 +43,25 @@ describe('ContactsService', () => {
   });
 
   describe('getContact', () => {
-    it('returns the scanned contact by id', async () => {
-      const contacts = [sampleContact()];
-      scanResolves(Model, contacts);
+    it('gets the contact by key and wraps it in an array', async () => {
+      const contact = sampleContact();
+      Model.get.mockResolvedValue(contact);
 
-      await expect(service.getContact('contact-1')).resolves.toBe(contacts);
-      expect(Model.scan).toHaveBeenCalledWith({ id: { eq: 'contact-1' } });
+      await expect(service.getContact('contact-1')).resolves.toEqual([
+        contact,
+      ]);
+      expect(Model.get).toHaveBeenCalledWith('contact-1');
     });
 
-    it('rejects when the scan fails', async () => {
-      scanRejects(Model, new Error('scan boom'));
+    it('returns an empty array when the contact does not exist', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.getContact('missing')).resolves.toEqual([]);
+    });
+
+    it('rejects when the get fails', async () => {
+      Model.get.mockRejectedValue(new Error('get boom'));
       await expect(service.getContact('contact-1')).rejects.toThrow(
-        'scan boom',
+        'get boom',
       );
     });
   });
@@ -84,7 +91,7 @@ describe('ContactsService', () => {
       };
       expect(cmd.input.TableName).toBe('BTCTutoring-Contacts-Table');
       expect(cmd.input.ProjectionExpression).toBe(
-        '#id, #fn, #ln, #em, #ph, #sv',
+        '#id, #fn, #ln, #em, #ph, #sv, #ug',
       );
       expect(cmd.input.ExpressionAttributeNames).toEqual({
         '#id': 'id',
@@ -93,6 +100,7 @@ describe('ContactsService', () => {
         '#em': 'email',
         '#ph': 'phone_number',
         '#sv': 'service',
+        '#ug': 'user_group',
       });
       expect(cmd.input.ExclusiveStartKey).toBeUndefined();
     });

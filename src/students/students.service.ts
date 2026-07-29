@@ -73,13 +73,10 @@ export class StudentsService {
   }
 
   async getStudent(id: string) {
-    return StudentsModel.scan({
-      id: { eq: id },
-    })
-      .all()
-      .exec()
+    // Keyed GetItem; array-of-one preserves the old scan-result shape.
+    return StudentsModel.get(id)
       .then((student) => {
-        return student;
+        return student ? [student] : [];
       })
       .catch((error: Error) => {
         Logger.error(error.message, error);
