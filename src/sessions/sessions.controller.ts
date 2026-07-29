@@ -33,9 +33,11 @@ export class SessionsController {
     @Query('to') to: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
-    const isTutor: boolean = user.groups.includes('Tutors');
-    const idMatchesTutor: boolean = tutor === user.email;
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
+    const isTutor: boolean = groups.includes('Tutors');
+    // Sessions store tutor_id = the tutor's contact id (not their email).
+    const idMatchesTutor: boolean = !!tutor && tutor === user.contact;
     // Optional start_datetime range; combinable with tutor/student filters.
     // Range params never change who may see what — the auth matrix is unchanged.
     const range: SessionRange | undefined =
@@ -72,7 +74,7 @@ export class SessionsController {
     @Body() session: Session,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.sessionsService.createSession(session);
     } else {
@@ -88,7 +90,7 @@ export class SessionsController {
     @Body() sessions: Session[],
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.sessionsService.createSessions(sessions);
     } else {
@@ -104,9 +106,12 @@ export class SessionsController {
     @Body() session: Session,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
-    const isTutor: boolean = user.groups.includes('Tutors');
-    const idMatchesTutor: boolean = session.tutor_id === user.email;
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
+    const isTutor: boolean = groups.includes('Tutors');
+    // Sessions store tutor_id = the tutor's contact id (not their email).
+    const idMatchesTutor: boolean =
+      !!session.tutor_id && session.tutor_id === user.contact;
     if (isAdmin || (isTutor && idMatchesTutor)) {
       return this.sessionsService.updateSession(session);
     } else {
@@ -122,7 +127,7 @@ export class SessionsController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.sessionsService.deleteSession(id);
     } else {

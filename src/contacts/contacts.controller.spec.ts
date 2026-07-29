@@ -18,6 +18,12 @@ const tutor: User = {
   contact: 'contact-tutor',
 };
 
+const groupless: User = {
+  username: 'nogroups',
+  email: 'nogroups@example.com',
+  groups: undefined as unknown as string[],
+  contact: 'c-nogroups',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -84,6 +90,30 @@ describe('ContactsController', () => {
       service.getContact.mockResolvedValue([contact] as never);
       await controller.getContacts(reqAs(tutor), 'contact-tutor', '', '');
       expect(service.getContact).toHaveBeenCalledWith('contact-tutor');
+    });
+
+    it('a groupless user with staff=true is rejected, not crashed', async () => {
+      await expect(
+        controller.getContacts(reqAs(groupless), '', 'true', ''),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getStaffContacts).not.toHaveBeenCalled();
+    });
+
+    it('a tutor with staff=true gets a names-only staff list', async () => {
+      service.getStaffContacts.mockResolvedValue([
+        {
+          id: 'c-1',
+          first_name: 'Tess',
+          last_name: 'Tutor',
+          email: 'tess@example.com',
+          hourly_rate: 45,
+        },
+      ] as never);
+      const result = await controller.getContacts(reqAs(tutor), '', 'true', '');
+      // Names only — pay rates and contact details never reach tutors.
+      expect(result).toEqual([
+        { id: 'c-1', first_name: 'Tess', last_name: 'Tutor' },
+      ]);
     });
 
     it('non-admin requesting another contact is unauthorized', async () => {

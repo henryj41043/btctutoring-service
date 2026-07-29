@@ -40,11 +40,11 @@ describe('Sessions (integration)', () => {
   it('a tutor can read their own sessions by tutor id', async () => {
     scanResolves(Model, []);
     const res = await request(server())
-      .get('/sessions?tutor=tutor@example.com')
+      .get('/sessions?tutor=contact-tutor')
       .set('x-test-role', 'tutor');
     expect(res.status).toBe(200);
     expect(Model.scan).toHaveBeenCalledWith({
-      tutor_id: { eq: 'tutor@example.com' },
+      tutor_id: { eq: 'contact-tutor' },
     });
   });
 
@@ -78,7 +78,7 @@ describe('Sessions (integration)', () => {
     const ok = await request(server())
       .put('/sessions')
       .set('x-test-role', 'tutor')
-      .send({ id: 's-1', tutor_id: 'tutor@example.com' });
+      .send({ id: 's-1', tutor_id: 'contact-tutor' });
     expect(ok.status).toBe(200);
 
     const denied = await request(server())

@@ -35,7 +35,7 @@ const session = (overrides: Partial<Session> = {}): Session =>
     notes: '',
     start_datetime: '2026-01-01T10:00:00Z',
     status: 'Pending',
-    tutor_id: 'tutor@example.com',
+    tutor_id: 'c-tutor',
     tutor_name: 'Tess',
     ...overrides,
   }) as Session;
@@ -83,14 +83,14 @@ describe('SessionsController', () => {
     it('admin + tutor & student -> getSessions', async () => {
       await controller.getSessions(
         reqAs(admin),
-        'tutor@example.com',
+        'c-tutor',
         'stu-1',
         '',
         '',
         '',
       );
       expect(service.getSessions).toHaveBeenCalledWith(
-        'tutor@example.com',
+        'c-tutor',
         'stu-1',
         undefined,
       );
@@ -99,14 +99,14 @@ describe('SessionsController', () => {
     it('owning tutor + tutor & student -> getSessions', async () => {
       await controller.getSessions(
         reqAs(tutor),
-        'tutor@example.com',
+        'c-tutor',
         'stu-1',
         '',
         '',
         '',
       );
       expect(service.getSessions).toHaveBeenCalledWith(
-        'tutor@example.com',
+        'c-tutor',
         'stu-1',
         undefined,
       );
@@ -128,14 +128,14 @@ describe('SessionsController', () => {
     it('admin + tutor only -> getSessionsByTutor', async () => {
       await controller.getSessions(
         reqAs(admin),
-        'tutor@example.com',
+        'c-tutor',
         '',
         '',
         '',
         '',
       );
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
-        'tutor@example.com',
+        'c-tutor',
         undefined,
       );
     });
@@ -143,14 +143,14 @@ describe('SessionsController', () => {
     it('owning tutor + tutor only -> getSessionsByTutor', async () => {
       await controller.getSessions(
         reqAs(tutor),
-        'tutor@example.com',
+        'c-tutor',
         '',
         '',
         '',
         '',
       );
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
-        'tutor@example.com',
+        'c-tutor',
         undefined,
       );
     });
@@ -228,7 +228,7 @@ describe('SessionsController', () => {
     it('owning tutor updates their own session', async () => {
       await controller.updateSession(
         reqAs(tutor),
-        session({ tutor_id: 'tutor@example.com' }),
+        session({ tutor_id: 'c-tutor' }),
       );
       expect(service.updateSession).toHaveBeenCalled();
     });
@@ -239,6 +239,30 @@ describe('SessionsController', () => {
           reqAs(tutor),
           session({ tutor_id: 'other@example.com' }),
         ),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('a user with no cognito groups is rejected, not crashed', async () => {
+      const groupless: User = {
+        username: 'nogroups',
+        email: 'nogroups@example.com',
+        groups: undefined as unknown as string[],
+        contact: 'c-nogroups',
+      };
+      await expect(
+        controller.getSessions(reqAs(groupless), '', '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.updateSession(reqAs(groupless), session()),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createSession(reqAs(groupless), session()),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createSessions(reqAs(groupless), [session()]),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.deleteSession(reqAs(groupless), 's-1'),
       ).rejects.toThrow('Unauthorized');
     });
 

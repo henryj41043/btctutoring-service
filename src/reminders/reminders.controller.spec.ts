@@ -18,6 +18,12 @@ const tutor: User = {
   contact: 'c-tutor',
 };
 
+const groupless: User = {
+  username: 'nogroups',
+  email: 'nogroups@example.com',
+  groups: undefined as unknown as string[],
+  contact: 'c-nogroups',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -83,5 +89,20 @@ describe('RemindersController', () => {
     expect(service.createReminder).not.toHaveBeenCalled();
     expect(service.updateReminder).not.toHaveBeenCalled();
     expect(service.deleteReminder).not.toHaveBeenCalled();
+  });
+
+  it('a user with no cognito groups is rejected everywhere, not crashed', async () => {
+    await expect(controller.getReminders(reqAs(groupless))).rejects.toThrow(
+      'Unauthorized',
+    );
+    await expect(
+      controller.createReminder(reqAs(groupless), reminder),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.updateReminder(reqAs(groupless), reminder),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.deleteReminder(reqAs(groupless), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
   });
 });

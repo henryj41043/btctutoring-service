@@ -26,7 +26,7 @@ export class StudentsController {
   @UseGuards(AuthGuard('jwt'))
   async getOnboardingStudents(@Request() req: express.Request): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.studentsService.getOnboardingStudents();
     } else {
@@ -45,11 +45,28 @@ export class StudentsController {
     @Query('include') include: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
+    // ?include=contact_name denormalizes each student with the family's
+    // display name (roster views), skipping a client-side join.
+    const withNames = include === 'contact_name';
+    // Tutors may list their own assigned students (rosters, payroll credits) —
+    // user.contact is the tutor's contact id, which students store as
+    // assigned_tutor_id.
+    if (
+      !isAdmin &&
+      groups.includes('Tutors') &&
+      tutorId &&
+      tutorId === user.contact
+    ) {
+      const students = (await this.studentsService.getStudentsByTutor(
+        tutorId,
+      )) as unknown as Student[];
+      return withNames
+        ? this.studentsService.withContactNames(students)
+        : students;
+    }
     if (isAdmin) {
-      // ?include=contact_name denormalizes each student with the family's
-      // display name (roster views), skipping a client-side join.
-      const withNames = include === 'contact_name';
       if (id) {
         return this.studentsService.getStudent(id);
       } else if (contactId) {
@@ -81,7 +98,7 @@ export class StudentsController {
     @Body() student: Student,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.studentsService.createStudent(student);
     } else {
@@ -97,7 +114,7 @@ export class StudentsController {
     @Body() student: Student,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.studentsService.updateStudent(student);
     } else {
@@ -113,7 +130,7 @@ export class StudentsController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.studentsService.deleteStudent(id);
     } else {
