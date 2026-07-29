@@ -25,7 +25,7 @@ export class RemindersController {
   @UseGuards(AuthGuard('jwt'))
   async getReminders(@Request() req: express.Request): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.remindersService.getReminders();
     } else {
@@ -41,7 +41,7 @@ export class RemindersController {
     @Body() reminder: Reminder,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.remindersService.createReminder(reminder);
     } else {
@@ -57,7 +57,7 @@ export class RemindersController {
     @Body() reminder: Reminder,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.remindersService.updateReminder(reminder);
     } else {
@@ -73,7 +73,7 @@ export class RemindersController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.remindersService.deleteReminder(id);
     } else {

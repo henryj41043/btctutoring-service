@@ -18,6 +18,12 @@ const tutor: User = {
   contact: 'c-tutor',
 };
 
+const groupless: User = {
+  username: 'nogroups',
+  email: 'nogroups@example.com',
+  groups: undefined as unknown as string[],
+  contact: 'c-nogroups',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -75,6 +81,36 @@ describe('NotesController', () => {
     it('non-admin -> unauthorized', async () => {
       await expect(
         controller.getNotes(reqAs(tutor), 'note-1', '', ''),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('a tutor reads the notes on their own contact record', async () => {
+      service.getNotesByRecipient.mockResolvedValue([] as never);
+      await controller.getNotes(reqAs(tutor), '', '', 'c-tutor');
+      expect(service.getNotesByRecipient).toHaveBeenCalledWith('c-tutor');
+    });
+
+    it("a tutor cannot read another contact's notes", async () => {
+      await expect(
+        controller.getNotes(reqAs(tutor), '', '', 'c-someone-else'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getNotesByRecipient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('groups hardening', () => {
+    it('a user with no cognito groups is rejected everywhere, not crashed', async () => {
+      await expect(
+        controller.getNotes(reqAs(groupless), '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createNote(reqAs(groupless), note),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.updateNote(reqAs(groupless), note),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.deleteNote(reqAs(groupless), 'note-1'),
       ).rejects.toThrow('Unauthorized');
     });
   });

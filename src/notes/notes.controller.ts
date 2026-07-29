@@ -31,7 +31,17 @@ export class NotesController {
     @Query('recipient') recipientId: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
+    // Tutors may read the notes on their own contact record.
+    if (
+      !isAdmin &&
+      groups.includes('Tutors') &&
+      recipientId &&
+      recipientId === user.contact
+    ) {
+      return this.notesService.getNotesByRecipient(recipientId);
+    }
     if (isAdmin) {
       if (id) {
         return this.notesService.getNote(id);
@@ -52,7 +62,7 @@ export class NotesController {
   @UseGuards(AuthGuard('jwt'))
   async createNote(@Request() req: express.Request, @Body() note: Note) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.notesService.createNote(note);
     } else {
@@ -65,7 +75,7 @@ export class NotesController {
   @UseGuards(AuthGuard('jwt'))
   async updateNote(@Request() req: express.Request, @Body() note: Note) {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.notesService.updateNote(note);
     } else {
@@ -81,7 +91,7 @@ export class NotesController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = user.groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.notesService.deleteNote(id);
     } else {

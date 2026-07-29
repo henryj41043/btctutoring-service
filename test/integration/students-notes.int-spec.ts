@@ -62,6 +62,17 @@ describe('Students & Notes (integration, admin-only)', () => {
       expect(res.status).toBe(403);
     });
 
+    it('a tutor lists their own assigned students', async () => {
+      scanResolves(StudentModel, []);
+      const res = await request(server())
+        .get('/students?tutor=contact-tutor')
+        .set('x-test-role', 'tutor');
+      expect(res.status).toBe(200);
+      expect(StudentModel.scan).toHaveBeenCalledWith({
+        assigned_tutor_id: { eq: 'contact-tutor' },
+      });
+    });
+
     it('admin creates a student', async () => {
       StudentModel.__save.mockResolvedValue(undefined);
       const res = await request(server())

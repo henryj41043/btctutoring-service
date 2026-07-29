@@ -46,6 +46,22 @@ export class ContactsController {
       // Any authenticated user may fetch their own contact record.
       // This is required by the login flow to load the user's profile.
       return this.contactsService.getContact(id);
+    } else if (
+      staff === 'true' &&
+      (user.groups ?? []).includes('Tutors')
+    ) {
+      // Tutors get a names-only staff list (for resolving tutor display
+      // names) — never full records, which carry pay rates.
+      const contacts = (await this.contactsService.getStaffContacts()) as {
+        id?: string;
+        first_name?: string;
+        last_name?: string;
+      }[];
+      return contacts.map(({ id: cid, first_name, last_name }) => ({
+        id: cid,
+        first_name,
+        last_name,
+      }));
     } else {
       Logger.error('User not authorized to get contacts');
       throw new ForbiddenException('Unauthorized');

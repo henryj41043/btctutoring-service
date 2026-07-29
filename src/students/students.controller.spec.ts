@@ -124,6 +124,69 @@ describe('StudentsController', () => {
     });
   });
 
+  describe('getStudents tutor self-roster', () => {
+    it('a tutor lists their own assigned students by contact id', async () => {
+      const students = [student];
+      service.getStudentsByTutor.mockResolvedValue(students as never);
+      const result = await controller.getStudents(
+        reqAs(tutor),
+        '',
+        '',
+        'c-tutor',
+        '',
+      );
+      expect(service.getStudentsByTutor).toHaveBeenCalledWith('c-tutor');
+      expect(result).toEqual(students);
+    });
+
+    it('a tutor gets contact_name enrichment on their own roster', async () => {
+      const students = [student];
+      const enriched = [{ ...student, contact_name: 'Ann Lee' }];
+      service.getStudentsByTutor.mockResolvedValue(students as never);
+      service.withContactNames.mockResolvedValue(enriched as never);
+      const result = await controller.getStudents(
+        reqAs(tutor),
+        '',
+        '',
+        'c-tutor',
+        'contact_name',
+      );
+      expect(service.withContactNames).toHaveBeenCalledWith(students);
+      expect(result).toEqual(enriched);
+    });
+
+    it("a tutor cannot list another tutor's students", async () => {
+      await expect(
+        controller.getStudents(reqAs(tutor), '', '', 'c-someone-else', ''),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getStudentsByTutor).not.toHaveBeenCalled();
+    });
+
+    it('a user with no cognito groups is rejected, not crashed', async () => {
+      const groupless: User = {
+        username: 'nogroups',
+        email: 'nogroups@example.com',
+        groups: undefined as unknown as string[],
+        contact: 'c-nogroups',
+      };
+      await expect(
+        controller.getStudents(reqAs(groupless), '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getOnboardingStudents(reqAs(groupless)),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createStudent(reqAs(groupless), student),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.updateStudent(reqAs(groupless), student),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.deleteStudent(reqAs(groupless), 'student-1'),
+      ).rejects.toThrow('Unauthorized');
+    });
+  });
+
   describe('getOnboardingStudents (admin only)', () => {
     it('admin -> getOnboardingStudents', async () => {
       await controller.getOnboardingStudents(reqAs(admin));
