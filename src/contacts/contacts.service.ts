@@ -189,12 +189,27 @@ export class ContactsService {
       });
   }
 
+  /**
+   * Drops undefined entries from an update payload. The app omits
+   * form-disabled fields entirely (e.g. `status` for a non-admin saving their
+   * own page), and writing those through as undefined would erase stored
+   * values — a status wipe would silently drop a tutor off the staff scans.
+   * Empty strings still pass through, so deliberate clears keep working.
+   */
+  private stripUndefined(
+    attributes: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(attributes).filter(([, value]) => value !== undefined),
+    );
+  }
+
   async updateContact(contact: Contact) {
     return ContactsModel.update(
       {
         id: contact.id,
       },
-      {
+      this.stripUndefined({
         first_name: contact.first_name,
         last_name: contact.last_name,
         email: contact.email,
@@ -239,7 +254,7 @@ export class ContactsService {
         training_completed: contact.training_completed,
         user_profile_created: contact.user_profile_created,
         user_group: contact.user_group,
-      },
+      }),
     )
       .then((updatedContact) => {
         return updatedContact;

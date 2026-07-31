@@ -282,6 +282,35 @@ describe('ContactsService', () => {
         'update boom',
       );
     });
+
+    it('drops undefined fields so partial saves never erase stored values', async () => {
+      Model.update.mockResolvedValue(sampleContact());
+
+      // A non-admin save omits disabled controls — status arrives undefined.
+      await service.updateContact(
+        sampleContact({ status: undefined, hourly_rate: undefined }),
+      );
+
+      const payload = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect('status' in payload).toBe(false);
+      expect('hourly_rate' in payload).toBe(false);
+      expect(payload['first_name']).toBe('Ada');
+    });
+
+    it('passes empty strings through so deliberate clears still work', async () => {
+      Model.update.mockResolvedValue(sampleContact());
+
+      await service.updateContact(sampleContact({ zoom_link: '' }));
+
+      const payload = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(payload['zoom_link']).toBe('');
+    });
   });
 
   describe('deleteContact', () => {
