@@ -91,7 +91,7 @@ describe('ContactsService', () => {
       };
       expect(cmd.input.TableName).toBe('BTCTutoring-Contacts-Table');
       expect(cmd.input.ProjectionExpression).toBe(
-        '#id, #fn, #ln, #em, #ph, #sv, #ug',
+        '#id, #fn, #ln, #em, #ph, #sv, #ug, #st',
       );
       expect(cmd.input.ExpressionAttributeNames).toEqual({
         '#id': 'id',
@@ -101,6 +101,7 @@ describe('ContactsService', () => {
         '#ph': 'phone_number',
         '#sv': 'service',
         '#ug': 'user_group',
+        '#st': 'status',
       });
       expect(cmd.input.ExclusiveStartKey).toBeUndefined();
     });
