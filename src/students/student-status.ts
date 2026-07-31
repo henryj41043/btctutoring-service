@@ -11,4 +11,7 @@ export const STUDENT_STATUS = {
   // that keeps students from being trapped in Onboarding forever. Inert for
   // billing/auto-renew/rosters (those gate on ACTIVE_STUDENT).
   MIA: 'MIA',
+  // Family formally declined services — operationally identical to MIA
+  // (inert everywhere); the distinct label is a clerical distinction only.
+  DECLINED_SERVICES: 'Declined Services',
 } as const;
