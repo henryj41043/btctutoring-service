@@ -54,7 +54,7 @@ export class ContactsService {
         const page = (await this.documentClient.send(
           new ScanCommand({
             TableName: 'BTCTutoring-Contacts-Table',
-            ProjectionExpression: '#id, #fn, #ln, #em, #ph, #sv, #ug',
+            ProjectionExpression: '#id, #fn, #ln, #em, #ph, #sv, #ug, #st',
             ExpressionAttributeNames: {
               '#id': 'id',
               '#fn': 'first_name',
@@ -63,6 +63,7 @@ export class ContactsService {
               '#ph': 'phone_number',
               '#sv': 'service',
               '#ug': 'user_group',
+              '#st': 'status',
             },
             ExclusiveStartKey: lastKey,
           }),
