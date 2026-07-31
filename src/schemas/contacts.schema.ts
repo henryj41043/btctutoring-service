@@ -33,6 +33,7 @@ export const ContactsSchema = new dynamoose.Schema({
   inquiry_note_from_parent: String,
   consult_date: Date,
   twenty_five_received: Boolean,
+  twenty_five_status: String,
   scholarship_student: Boolean,
   scholarship_name: String,
   trial_date: Date,
