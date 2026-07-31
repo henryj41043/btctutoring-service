@@ -153,7 +153,24 @@ describe('AutoRenewService', () => {
     expect(result.billingRecords).toBe(0);
   });
 
-  it('applies the sibling discount when 2+ students are enrolled', async () => {
+  it('applies the sibling discount when 3+ students are enrolled', async () => {
+    students.getStudents.mockResolvedValue([
+      student({ id: 's-1' }),
+      student({ id: 's-2' }),
+      student({ id: 's-3' }),
+    ]);
+    contacts.getContacts.mockResolvedValue([
+      parent({ sibling_discount: 10 }),
+      tutor(),
+    ]);
+    await service.runAutoRenew(july);
+    // 3 × $362 = $1086, less 10% = $977.40.
+    expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 977.4 }),
+    );
+  });
+
+  it('does not discount a two-student family (below the 3+ threshold)', async () => {
     students.getStudents.mockResolvedValue([
       student({ id: 's-1' }),
       student({ id: 's-2' }),
@@ -163,9 +180,9 @@ describe('AutoRenewService', () => {
       tutor(),
     ]);
     await service.runAutoRenew(july);
-    // 2 × $362 = $724, less 10% = $651.60.
+    // 2 × $362 with NO discount — the threshold is now 3 students.
     expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 651.6 }),
+      expect.objectContaining({ amount: 724 }),
     );
   });
 

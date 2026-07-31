@@ -75,15 +75,15 @@ export function studentMonthlyCharge(
 
 /**
  * Applies the family's sibling discount to a contact's total, but only when the
- * family actually has 2+ enrolled students. A stale percent never discounts an
- * only child.
+ * family actually has 3+ enrolled students (per the client's policy). A stale
+ * percent never discounts a smaller family.
  */
 export function siblingDiscountedTotal(
   total: number,
   percent: number | undefined,
   enrolledStudentCount: number,
 ): number {
-  if (!percent || percent <= 0 || enrolledStudentCount < 2) {
+  if (!percent || percent <= 0 || enrolledStudentCount < 3) {
     return total;
   }
   const pct = Math.min(100, Math.max(0, percent));

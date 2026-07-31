@@ -65,6 +65,8 @@ export class Contact {
   @IsDate()
   consult_date?: Date;
   twenty_five_received?: boolean;
+  /** 'Pending' | 'Received' | 'N/A' — supersedes twenty_five_received. */
+  twenty_five_status?: string;
   scholarship_student?: boolean;
   scholarship_name?: string;
   @IsOptional()
