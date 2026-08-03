@@ -160,6 +160,7 @@ export class ContactsService {
       registration_received: contact.registration_received,
       title: contact.title,
       currently_accepting_students: contact.currently_accepting_students,
+      is_tutor: contact.is_tutor,
       availability: contact.availability?.map((block) => ({
         days: block.days,
         start_time: block.start_time,
@@ -240,6 +241,7 @@ export class ContactsService {
         registration_received: contact.registration_received,
         title: contact.title,
         currently_accepting_students: contact.currently_accepting_students,
+        is_tutor: contact.is_tutor,
         availability: contact.availability?.map((block) => ({
           days: block.days,
           start_time: block.start_time,

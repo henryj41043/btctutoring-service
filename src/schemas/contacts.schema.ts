@@ -41,6 +41,7 @@ export const ContactsSchema = new dynamoose.Schema({
   registration_received: Date,
   title: String,
   currently_accepting_students: Boolean,
+  is_tutor: Boolean,
   // Deprecated: replaced by structured `availability` below. Kept so reads of
   // pre-existing records with free-text availability don't error.
   tutoring_availability: String,
