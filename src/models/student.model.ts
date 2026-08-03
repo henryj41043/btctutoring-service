@@ -15,6 +15,8 @@ export class Student {
   contact_id: string;
   name: string;
   birthday: string;
+  /** 'YYYY-MM-DD' trial-session date (per student; replaces contact.trial_date). */
+  trial_date?: string;
   status: string;
   /** True once the student has finished onboarding; gates status/package/tutor/schedule edits. */
   onboarding_complete?: boolean;

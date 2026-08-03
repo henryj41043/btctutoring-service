@@ -31,6 +31,7 @@ export class StudentsService {
       contact_id: student.contact_id,
       name: student.name,
       birthday: student.birthday,
+      trial_date: student.trial_date,
       status: student.status,
       onboarding_complete: student.onboarding_complete,
       assigned_tutor_id: student.assigned_tutor_id,
