@@ -141,13 +141,25 @@ export class StudentsService {
         .all()
         .exec()) as unknown as Student[];
 
+      // One combined batchGet covers family contacts AND assigned tutors.
       const contactIds = [
-        ...new Set(students.map((s) => s.contact_id).filter(Boolean)),
+        ...new Set(
+          [
+            ...students.map((s) => s.contact_id),
+            ...students.map((s) => s.assigned_tutor_id),
+          ].filter(Boolean),
+        ),
       ];
       const contactsById = await this.getContactsByIds(contactIds);
 
       return students.map((student) =>
-        this.buildOnboardingRow(student, contactsById.get(student.contact_id)),
+        this.buildOnboardingRow(
+          student,
+          contactsById.get(student.contact_id),
+          student.assigned_tutor_id
+            ? contactsById.get(student.assigned_tutor_id)
+            : undefined,
+        ),
       );
     } catch (error) {
       Logger.error((error as Error).message, error as Error);
@@ -197,9 +209,13 @@ export class StudentsService {
   private buildOnboardingRow(
     student: Student,
     contact?: Contact,
+    tutor?: Contact,
   ): OnboardingRow {
     const contactName = contact
       ? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim()
+      : '';
+    const tutorName = tutor
+      ? `${tutor.first_name ?? ''} ${tutor.last_name ?? ''}`.trim()
       : '';
     return {
       id: student.id,
@@ -208,10 +224,12 @@ export class StudentsService {
       status: student.status,
       onboarding_complete: student.onboarding_complete ?? false,
       contact_name: contactName,
+      tutor_name: tutorName,
       inquiry_received: contact?.inquiry_received,
       inquiry_note_from_parent: contact?.inquiry_note_from_parent,
       consult_date: contact?.consult_date,
-      trial_date: contact?.trial_date,
+      // Per-student date (2026-08) wins; legacy contact-level date as fallback.
+      trial_date: student.trial_date ?? contact?.trial_date,
       registration_sent: contact?.registration_sent,
       registration_received: contact?.registration_received,
       scholarship_name: contact?.scholarship_name,

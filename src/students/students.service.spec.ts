@@ -219,6 +219,50 @@ describe('StudentsService', () => {
       Contacts.batchGet.mockReset();
     });
 
+    it('prefers the per-student trial date and falls back to the contact date', async () => {
+      scanResolves(Model, [
+        sampleStudent({
+          id: 's-own',
+          contact_id: 'c1',
+          status: 'Onboarding',
+          trial_date: '2026-08-20',
+        }),
+        sampleStudent({
+          id: 's-legacy',
+          contact_id: 'c1',
+          status: 'Onboarding',
+          trial_date: undefined,
+        }),
+      ]);
+      const contactTrial = new Date('2026-08-01T00:00:00.000Z');
+      Contacts.batchGet.mockResolvedValue([
+        { id: 'c1', first_name: 'Ann', trial_date: contactTrial },
+        { id: 'tutor@example.com', first_name: 'Tess' },
+      ]);
+
+      const rows = await service.getOnboardingStudents();
+
+      expect(rows[0].trial_date).toBe('2026-08-20');
+      expect(rows[1].trial_date).toBe(contactTrial);
+    });
+
+    it('leaves tutor_name empty for an unassigned student', async () => {
+      scanResolves(Model, [
+        sampleStudent({
+          id: 's-unassigned',
+          contact_id: 'c1',
+          status: 'Onboarding',
+          assigned_tutor_id: undefined as never,
+        }),
+      ]);
+      Contacts.batchGet.mockResolvedValue([{ id: 'c1', first_name: 'Ann' }]);
+
+      const rows = await service.getOnboardingStudents();
+
+      expect(Contacts.batchGet).toHaveBeenCalledWith(['c1']);
+      expect(rows[0].tutor_name).toBe('');
+    });
+
     it('scans onboarding students and joins their family name + onboarding dates', async () => {
       const inquiry = new Date('2026-01-05T00:00:00.000Z');
       const consult = new Date('2026-02-01T00:00:00.000Z');
@@ -269,6 +313,8 @@ describe('StudentsService', () => {
         // Malformed batchGet results (null / missing id) must be skipped.
         null,
         { first_name: 'No Id' },
+        // The assigned tutor is joined from the same batchGet.
+        { id: 'tutor@example.com', first_name: 'Tess', last_name: 'Coach' },
       ]);
 
       const rows = await service.getOnboardingStudents();
@@ -276,7 +322,12 @@ describe('StudentsService', () => {
       expect(Model.scan).toHaveBeenCalledWith({
         status: { eq: 'Onboarding' },
       });
-      expect(Contacts.batchGet).toHaveBeenCalledWith(['c1', 'c2', 'c3']);
+      expect(Contacts.batchGet).toHaveBeenCalledWith([
+        'c1',
+        'c2',
+        'c3',
+        'tutor@example.com',
+      ]);
       expect(rows).toHaveLength(4);
 
       expect(rows[0]).toMatchObject({
@@ -285,6 +336,7 @@ describe('StudentsService', () => {
         name: 'Kid One',
         onboarding_complete: true,
         contact_name: 'Ann Lee',
+        tutor_name: 'Tess Coach',
         inquiry_received: inquiry,
         consult_date: consult,
         scholarship_name: 'Fund',
