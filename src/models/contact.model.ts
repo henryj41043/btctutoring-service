@@ -92,6 +92,8 @@ export class Contact {
   availability?: AvailabilityBlock[];
   zoom_link?: string;
   hourly_rate?: number;
+  /** Staff hire classification for payroll/tax purposes: 'W2' | '1099'. */
+  hire_type?: string;
   @IsOptional()
   @Type(() => Date)
   @IsDate()

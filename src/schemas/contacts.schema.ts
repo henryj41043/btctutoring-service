@@ -60,6 +60,7 @@ export const ContactsSchema = new dynamoose.Schema({
   },
   zoom_link: String,
   hourly_rate: Number,
+  hire_type: String,
   hiring_inquiry_received: Date,
   interview_offer_sent: Date,
   interview_scheduled: Date,
