@@ -38,10 +38,11 @@ export class NotificationsService {
       return;
     }
 
-    // Filter: TUTORING type, Pending status, ended before start of today
+    // Filter: TUTORING/TRIAL type, Pending status, ended before start of
+    // today — a trial left Pending needs attendance just like a lesson.
     const staleSessions = allSessions.filter(
       (s) =>
-        s.type === SessionType.TUTORING &&
+        (s.type === SessionType.TUTORING || s.type === SessionType.TRIAL) &&
         s.status === 'Pending' &&
         s.end_datetime &&
         new Date(s.end_datetime) < startOfToday,

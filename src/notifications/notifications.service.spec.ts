@@ -58,6 +58,17 @@ describe('NotificationsService', () => {
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
   });
 
+  it('includes stale pending TRIAL sessions in the digest', async () => {
+    sessionsService.getAllSessions.mockResolvedValue([
+      stale({ type: SessionType.TRIAL }),
+    ] as never);
+    contactsService.getContact.mockResolvedValue([
+      { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
+    ] as never);
+    await service.sendPendingSessionReminders();
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
+  });
+
   it('sends nothing when there are no stale pending sessions', async () => {
     sessionsService.getAllSessions.mockResolvedValue([
       stale({ status: 'Completed' }),
