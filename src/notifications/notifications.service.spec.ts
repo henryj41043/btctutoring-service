@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { Logger } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { ContactsService } from '../contacts/contacts.service';
@@ -56,6 +57,66 @@ describe('NotificationsService', () => {
     sessionsService.getAllSessions.mockRejectedValue(new Error('db down'));
     await service.sendPendingSessionReminders();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+  });
+
+  it('announces the job start with the exact log line', async () => {
+    const logSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    sessionsService.getAllSessions.mockResolvedValue([] as never);
+    await service.sendPendingSessionReminders();
+    expect(logSpy).toHaveBeenCalledWith('Running pending session reminder job...');
+    logSpy.mockRestore();
+  });
+
+  it('cuts the stale window at local midnight, not the current hour', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    // 18:00 UTC / 14:00 ET — mid-afternoon in both CI (UTC) and local (ET).
+    jest.setSystemTime(new Date('2026-08-05T18:00:00Z'));
+    try {
+      sessionsService.getAllSessions.mockResolvedValue([
+        // Ended earlier TODAY (after midnight in both timezones): not stale.
+        stale({
+          start_datetime: '2026-08-05T11:00:00Z',
+          end_datetime: '2026-08-05T12:00:00Z',
+        }),
+      ] as never);
+      await service.sendPendingSessionReminders();
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('resolves the SES region from the environment with a us-east-1 fallback', async () => {
+    const originalRegion = process.env.AWS_DEFAULT_REGION;
+    try {
+      process.env.AWS_DEFAULT_REGION = 'eu-test-1';
+      const configured = new NotificationsService(
+        sessionsService as never,
+        contactsService as never,
+      );
+      const configuredRegion = (configured as unknown as {
+        ses: { config: { region: () => Promise<string> } };
+      }).ses.config.region;
+      await expect(configuredRegion()).resolves.toBe('eu-test-1');
+
+      delete process.env.AWS_DEFAULT_REGION;
+      const fallback = new NotificationsService(
+        sessionsService as never,
+        contactsService as never,
+      );
+      const fallbackRegion = (fallback as unknown as {
+        ses: { config: { region: () => Promise<string> } };
+      }).ses.config.region;
+      await expect(fallbackRegion()).resolves.toBe('us-east-1');
+    } finally {
+      if (originalRegion === undefined) {
+        delete process.env.AWS_DEFAULT_REGION;
+      } else {
+        process.env.AWS_DEFAULT_REGION = originalRegion;
+      }
+    }
   });
 
   it('includes stale pending TRIAL sessions in the digest', async () => {
