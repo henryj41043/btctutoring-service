@@ -200,6 +200,17 @@ describe('ContactsService', () => {
       });
     });
 
+    it('persists the hire type on create', async () => {
+      scanResolves(Model, []);
+      Model.__save.mockResolvedValue(undefined);
+
+      await service.createContact(sampleContact({ hire_type: 'W2' }));
+
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({ hire_type: 'W2' }),
+      );
+    });
+
     it('handles a contact without an availability list', async () => {
       scanResolves(Model, []);
       Model.__save.mockResolvedValue(undefined);
@@ -277,6 +288,18 @@ describe('ContactsService', () => {
       expect(result).toBe(updated);
     });
 
+    it('persists the hire type on update', async () => {
+      Model.update.mockResolvedValue(sampleContact());
+
+      await service.updateContact(sampleContact({ hire_type: '1099' }));
+
+      const payload = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(payload['hire_type']).toBe('1099');
+    });
+
     it('rejects when update fails', async () => {
       Model.update.mockRejectedValue(new Error('update boom'));
       await expect(service.updateContact(sampleContact())).rejects.toThrow(
@@ -289,7 +312,11 @@ describe('ContactsService', () => {
 
       // A non-admin save omits disabled controls — status arrives undefined.
       await service.updateContact(
-        sampleContact({ status: undefined, hourly_rate: undefined }),
+        sampleContact({
+          status: undefined,
+          hourly_rate: undefined,
+          hire_type: undefined,
+        }),
       );
 
       const payload = Model.update.mock.calls.at(-1)![1] as Record<
@@ -298,6 +325,7 @@ describe('ContactsService', () => {
       >;
       expect('status' in payload).toBe(false);
       expect('hourly_rate' in payload).toBe(false);
+      expect('hire_type' in payload).toBe(false);
       expect(payload['first_name']).toBe('Ada');
     });
 
