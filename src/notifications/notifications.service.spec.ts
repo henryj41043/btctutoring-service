@@ -85,11 +85,19 @@ describe('NotificationsService', () => {
     contactsService.getContact.mockResolvedValue([
       { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
     ] as never);
+      const localMidnight = new Date();
+      localMidnight.setHours(0, 0, 0, 0);
       sessionsService.getAllSessions.mockResolvedValue([
         // Ended earlier TODAY (after midnight in both timezones): not stale.
         stale({
           start_datetime: '2026-08-05T11:00:00Z',
           end_datetime: '2026-08-05T12:00:00Z',
+        }),
+        // Ended EXACTLY at local midnight: the boundary is strict (<).
+        stale({
+          id: 's-midnight',
+          start_datetime: localMidnight.toISOString(),
+          end_datetime: localMidnight.toISOString(),
         }),
       ] as never);
       await service.sendPendingSessionReminders();
@@ -152,8 +160,13 @@ describe('NotificationsService', () => {
       stale({ type: SessionType.ADMIN }),
       stale({ end_datetime: undefined }),
     ] as never);
+    const logSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
     await service.sendPendingSessionReminders();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    expect(logSpy).toHaveBeenCalledWith('No stale pending sessions found.');
+    logSpy.mockRestore();
   });
 
   it('sends one digest email per tutor with the right subject', async () => {
@@ -175,6 +188,57 @@ describe('NotificationsService', () => {
       'Action Required: 2 sessions are awaiting attendance',
     );
     expect(input.Source).toBe('noreply@example.com');
+  });
+
+  it('renders the digest body exactly: sorted lines, ET formatting, names', async () => {
+    const logSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    sessionsService.getAllSessions.mockResolvedValue([
+      // Deliberately out of order; 'b' has no student name.
+      stale({ id: 'a', start_datetime: '2020-01-05T15:00:00Z', student_name: 'Pat' }),
+      stale({ id: 'b', start_datetime: '2020-01-03T14:30:00Z', student_name: undefined }),
+    ] as never);
+    contactsService.getContact.mockResolvedValue([
+      { email: 'tess@example.com', first_name: 'Tess' },
+    ] as never);
+
+    await service.sendPendingSessionReminders();
+
+    const input = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+    expect(input.Message?.Body?.Text?.Data).toBe(
+      [
+        'Hi Tess,',
+        '',
+        'This is a reminder that 2 sessions from your schedule are still marked as Pending and need an attendance update:',
+        '',
+        '  • Fri, Jan 3, 2020 at 9:30 AM',
+        '  • Sun, Jan 5, 2020 at 10:00 AM — Pat',
+        '',
+        'Please log in to Beyond the Chalkboard Tutoring and update the session status at your earliest convenience.',
+        '',
+        'You will continue to receive this reminder each morning until the status is updated.',
+        '',
+        '— Beyond the Chalkboard Tutoring',
+      ].join('\n'),
+    );
+    expect(logSpy).toHaveBeenCalledWith('Found 2 stale pending session(s).');
+    expect(logSpy).toHaveBeenCalledWith(
+      'Reminder sent to tess@example.com for 2 session(s).',
+    );
+    logSpy.mockRestore();
+  });
+
+  it('greets with the last name when the first name is missing (trim matters)', async () => {
+    sessionsService.getAllSessions.mockResolvedValue([stale()] as never);
+    contactsService.getContact.mockResolvedValue([
+      { email: 'coach@example.com', last_name: 'Coach' },
+    ] as never);
+
+    await service.sendPendingSessionReminders();
+
+    const input = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+    expect(input.Message?.Body?.Text?.Data).toContain('Hi Coach,');
   });
 
   it('uses singular wording for a single stale session and tolerates a nameless contact', async () => {
@@ -204,12 +268,19 @@ describe('NotificationsService', () => {
   });
 
   it('skips a tutor whose contact has no email', async () => {
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
     sessionsService.getAllSessions.mockResolvedValue([stale()] as never);
     contactsService.getContact.mockResolvedValue([
       { first_name: 'NoEmail' },
     ] as never);
     await service.sendPendingSessionReminders();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'No email found for tutor tutor-1, skipping.',
+    );
+    warnSpy.mockRestore();
   });
 
   it('continues when sending for one tutor throws', async () => {
