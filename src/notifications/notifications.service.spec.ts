@@ -54,9 +54,17 @@ describe('NotificationsService', () => {
   });
 
   it('returns early and sends nothing when fetching sessions fails', async () => {
+    const errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     sessionsService.getAllSessions.mockRejectedValue(new Error('db down'));
     await service.sendPendingSessionReminders();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to fetch sessions for reminder job',
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
   });
 
   it('announces the job start with the exact log line', async () => {
@@ -74,6 +82,9 @@ describe('NotificationsService', () => {
     // 18:00 UTC / 14:00 ET — mid-afternoon in both CI (UTC) and local (ET).
     jest.setSystemTime(new Date('2026-08-05T18:00:00Z'));
     try {
+    contactsService.getContact.mockResolvedValue([
+      { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
+    ] as never);
       sessionsService.getAllSessions.mockResolvedValue([
         // Ended earlier TODAY (after midnight in both timezones): not stale.
         stale({
@@ -131,10 +142,15 @@ describe('NotificationsService', () => {
   });
 
   it('sends nothing when there are no stale pending sessions', async () => {
+    // Contact resolvable — a wrongly-included session would actually send.
+    contactsService.getContact.mockResolvedValue([
+      { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
+    ] as never);
     sessionsService.getAllSessions.mockResolvedValue([
       stale({ status: 'Completed' }),
       stale({ end_datetime: FUTURE, start_datetime: FUTURE }),
       stale({ type: SessionType.ADMIN }),
+      stale({ end_datetime: undefined }),
     ] as never);
     await service.sendPendingSessionReminders();
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
