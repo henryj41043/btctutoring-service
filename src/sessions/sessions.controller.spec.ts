@@ -56,6 +56,7 @@ describe('SessionsController', () => {
   beforeEach(async () => {
     const serviceMock: Partial<jest.Mocked<SessionsService>> = {
       getSessions: jest.fn(),
+      getSessionById: jest.fn(),
       getSessionsByTutor: jest.fn(),
       getSessionsByTutors: jest.fn(),
       getSessionsByStudent: jest.fn(),
@@ -308,7 +309,8 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
-    it('lead updates their OWN session like any tutor', async () => {
+    it('lead updates their OWN stored session like any tutor', async () => {
+      service.getSessionById.mockResolvedValue(session({ tutor_id: 'c-lead' }));
       await controller.updateSession(
         reqAs(lead),
         session({ tutor_id: 'c-lead' }),
@@ -320,6 +322,14 @@ describe('SessionsController', () => {
       await expect(
         controller.updateSession(reqAs(lead), session({ tutor_id: 'c-m1' })),
       ).rejects.toThrow('Unauthorized');
+    });
+
+    it('lead cannot hijack a member session by claiming their own id', async () => {
+      service.getSessionById.mockResolvedValue(session({ tutor_id: 'c-m1' }));
+      await expect(
+        controller.updateSession(reqAs(lead), session({ tutor_id: 'c-lead' })),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.updateSession).not.toHaveBeenCalled();
     });
 
     it('lead cannot create or delete sessions', async () => {
@@ -358,29 +368,65 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
-    it('admin updates any session', async () => {
+    it('admin updates any session without an ownership lookup', async () => {
       await controller.updateSession(
         reqAs(admin),
         session({ tutor_id: 'other@example.com' }),
       );
       expect(service.updateSession).toHaveBeenCalled();
+      expect(service.getSessionById).not.toHaveBeenCalled();
     });
 
-    it('owning tutor updates their own session', async () => {
+    it('owning tutor updates their own stored session', async () => {
+      service.getSessionById.mockResolvedValue(session({ tutor_id: 'c-tutor' }));
       await controller.updateSession(
         reqAs(tutor),
         session({ tutor_id: 'c-tutor' }),
       );
+      expect(service.getSessionById).toHaveBeenCalledWith('s-1');
       expect(service.updateSession).toHaveBeenCalled();
     });
 
-    it('tutor cannot update another tutor session', async () => {
+    it('tutor cannot update another tutor session (payload claims the other tutor)', async () => {
       await expect(
         controller.updateSession(
           reqAs(tutor),
           session({ tutor_id: 'other@example.com' }),
         ),
       ).rejects.toThrow('Unauthorized');
+      // Fails on the payload check — no lookup needed.
+      expect(service.getSessionById).not.toHaveBeenCalled();
+    });
+
+    it('tutor cannot hijack a session stored under another tutor by claiming their own id', async () => {
+      // The stored record is the authority: payload says c-tutor, storage says otherwise.
+      service.getSessionById.mockResolvedValue(
+        session({ tutor_id: 'c-other-tutor' }),
+      );
+      await expect(
+        controller.updateSession(reqAs(tutor), session({ tutor_id: 'c-tutor' })),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getSessionById).toHaveBeenCalledWith('s-1');
+      expect(service.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('tutor cannot update a session that does not exist', async () => {
+      service.getSessionById.mockResolvedValue(undefined);
+      await expect(
+        controller.updateSession(reqAs(tutor), session({ tutor_id: 'c-tutor' })),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('tutor cannot update a payload with no session id', async () => {
+      await expect(
+        controller.updateSession(
+          reqAs(tutor),
+          session({ id: undefined, tutor_id: 'c-tutor' }),
+        ),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getSessionById).not.toHaveBeenCalled();
+      expect(service.updateSession).not.toHaveBeenCalled();
     });
 
     it('a user with no cognito groups is rejected, not crashed', async () => {

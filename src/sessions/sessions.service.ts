@@ -36,6 +36,18 @@ export class SessionsService {
     return scan;
   }
 
+  /** Keyed GetItem for one session, or undefined when the id is unknown. */
+  async getSessionById(id: string): Promise<Session | undefined> {
+    return SessionsModel.get(id)
+      .then((session) => {
+        return session as unknown as Session | undefined;
+      })
+      .catch((err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      });
+  }
+
   async getSessions(tutor: string, student: string, range?: SessionRange) {
     return this.applyRange(
       SessionsModel.scan({

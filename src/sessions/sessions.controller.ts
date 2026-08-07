@@ -130,18 +130,26 @@ export class SessionsController {
     const user: User = req.user as User;
     const groups: string[] = user.groups ?? [];
     const isAdmin: boolean = groups.includes('Admins');
+    if (isAdmin) {
+      return this.sessionsService.updateSession(session);
+    }
     // Leads may edit their OWN sessions like any tutor — team visibility is
-    // read-only, so members' sessions never pass the id check below.
-    const tutorLike: boolean = isTutorLike(groups);
+    // read-only, so members' sessions never pass the ownership checks below.
     // Sessions store tutor_id = the tutor's contact id (not their email).
+    // The payload check alone is not enough: the update is keyed by the
+    // body's id, so ownership must be verified against the STORED session —
+    // otherwise any tutor could overwrite any session id by claiming their
+    // own tutor_id in the payload.
     const idMatchesTutor: boolean =
       !!session.tutor_id && session.tutor_id === user.contact;
-    if (isAdmin || (tutorLike && idMatchesTutor)) {
-      return this.sessionsService.updateSession(session);
-    } else {
-      Logger.error('Invalid credentials for the session being edited');
-      throw new ForbiddenException('Unauthorized');
+    if (isTutorLike(groups) && idMatchesTutor && session.id) {
+      const stored = await this.sessionsService.getSessionById(session.id);
+      if (stored && stored.tutor_id === user.contact) {
+        return this.sessionsService.updateSession(session);
+      }
     }
+    Logger.error('Invalid credentials for the session being edited');
+    throw new ForbiddenException('Unauthorized');
   }
 
   @Delete(':id')
