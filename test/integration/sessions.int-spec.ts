@@ -79,19 +79,32 @@ describe('Sessions (integration)', () => {
     expect(res.body.message).toBe('Session created successfully.');
   });
 
-  it('a tutor may update their own session but not others', async () => {
+  it('a tutor may update their own stored session but not others', async () => {
+    Model.get.mockResolvedValue({ id: 's-1', tutor_id: 'contact-tutor' });
     Model.update.mockResolvedValue({ id: 's-1' });
     const ok = await request(server())
       .put('/sessions')
       .set('x-test-role', 'tutor')
       .send({ id: 's-1', tutor_id: 'contact-tutor' });
     expect(ok.status).toBe(200);
+    expect(Model.get).toHaveBeenCalledWith('s-1');
 
     const denied = await request(server())
       .put('/sessions')
       .set('x-test-role', 'tutor')
       .send({ id: 's-2', tutor_id: 'other@example.com' });
     expect(denied.status).toBe(403);
+  });
+
+  it('a tutor cannot hijack a session stored under another tutor', async () => {
+    // Payload claims the caller, but the stored record says otherwise.
+    Model.get.mockResolvedValue({ id: 's-9', tutor_id: 'contact-other' });
+    const res = await request(server())
+      .put('/sessions')
+      .set('x-test-role', 'tutor')
+      .send({ id: 's-9', tutor_id: 'contact-tutor' });
+    expect(res.status).toBe(403);
+    expect(Model.update).not.toHaveBeenCalled();
   });
 
   it('a lead with a team gets the whole team sessions on the parameterless GET', async () => {
@@ -135,7 +148,8 @@ describe('Sessions (integration)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('a lead may update their own session but not a member session', async () => {
+  it('a lead may update their own stored session but not a member session', async () => {
+    Model.get.mockResolvedValue({ id: 's-1', tutor_id: 'contact-lead' });
     Model.update.mockResolvedValue({ id: 's-1' });
     const ok = await request(server())
       .put('/sessions')

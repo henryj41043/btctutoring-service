@@ -53,6 +53,24 @@ describe('SessionsService', () => {
       });
     });
 
+    it('getSessionById does a keyed get', async () => {
+      Model.get.mockResolvedValue({ id: 's-1' });
+      await expect(service.getSessionById('s-1')).resolves.toEqual({
+        id: 's-1',
+      });
+      expect(Model.get).toHaveBeenCalledWith('s-1');
+    });
+
+    it('getSessionById returns undefined for an unknown id', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.getSessionById('nope')).resolves.toBeUndefined();
+    });
+
+    it('getSessionById rejects when the get fails', async () => {
+      Model.get.mockRejectedValue(new Error('get boom'));
+      await expect(service.getSessionById('s-1')).rejects.toThrow('get boom');
+    });
+
     it('getSessionsByTutor scans by tutor', async () => {
       scanResolves(Model, []);
       await service.getSessionsByTutor('tutor@example.com');
