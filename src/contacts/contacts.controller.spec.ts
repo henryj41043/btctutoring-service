@@ -24,6 +24,12 @@ const groupless: User = {
   groups: undefined as unknown as string[],
   contact: 'c-nogroups',
 };
+const lead: User = {
+  username: 'lead',
+  email: 'lead@example.com',
+  groups: ['LeadTutors'],
+  contact: 'c-lead',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -111,6 +117,22 @@ describe('ContactsController', () => {
       ] as never);
       const result = await controller.getContacts(reqAs(tutor), '', 'true', '');
       // Names only — pay rates and contact details never reach tutors.
+      expect(result).toEqual([
+        { id: 'c-1', first_name: 'Tess', last_name: 'Tutor' },
+      ]);
+    });
+
+
+    it('a lead tutor with staff=true gets the same names-only list', async () => {
+      service.getStaffContacts.mockResolvedValue([
+        {
+          id: 'c-1',
+          first_name: 'Tess',
+          last_name: 'Tutor',
+          hourly_rate: 45,
+        },
+      ] as never);
+      const result = await controller.getContacts(reqAs(lead), '', 'true', '');
       expect(result).toEqual([
         { id: 'c-1', first_name: 'Tess', last_name: 'Tutor' },
       ]);

@@ -17,6 +17,7 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Student } from '../models/student.model';
+import { isTutorLike } from '../models/user-groups';
 
 @Controller('students')
 export class StudentsController {
@@ -53,12 +54,7 @@ export class StudentsController {
     // Tutors may list their own assigned students (rosters, payroll credits) —
     // user.contact is the tutor's contact id, which students store as
     // assigned_tutor_id.
-    if (
-      !isAdmin &&
-      groups.includes('Tutors') &&
-      tutorId &&
-      tutorId === user.contact
-    ) {
+    if (!isAdmin && isTutorLike(groups) && tutorId && tutorId === user.contact) {
       const students = (await this.studentsService.getStudentsByTutor(
         tutorId,
       )) as unknown as Student[];

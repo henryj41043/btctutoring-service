@@ -61,6 +61,28 @@ describe('SessionsService', () => {
       });
     });
 
+    it('getSessionsByTutors scans once with the exact id set', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessionsByTutors(['c-lead', 'c-m1', 'c-m2']);
+      expect(Model.scan).toHaveBeenCalledWith();
+      expect(chain.where).toHaveBeenCalledWith('tutor_id');
+      expect(chain.in).toHaveBeenCalledWith(['c-lead', 'c-m1', 'c-m2']);
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('getSessionsByTutors applies the start_datetime range', async () => {
+      const chain = scanResolves(Model, []);
+      await service.getSessionsByTutors(['c-lead'], {
+        from: '2026-07-01T00:00:00Z',
+        to: '2026-07-31T23:59:59Z',
+      });
+      expect(chain.where).toHaveBeenCalledWith('start_datetime');
+      expect(chain.between).toHaveBeenCalledWith(
+        '2026-07-01T00:00:00Z',
+        '2026-07-31T23:59:59Z',
+      );
+    });
+
     it('getSessionsByStudent scans by student', async () => {
       scanResolves(Model, []);
       await service.getSessionsByStudent('student-1');
@@ -86,6 +108,7 @@ describe('SessionsService', () => {
     it.each([
       ['getSessions', () => service.getSessions('t', 's')],
       ['getSessionsByTutor', () => service.getSessionsByTutor('t')],
+      ['getSessionsByTutors', () => service.getSessionsByTutors(['t'])],
       ['getSessionsByStudent', () => service.getSessionsByStudent('s')],
       ['getAllSessions', () => service.getAllSessions()],
       ['getSessionsBySeries', () => service.getSessionsBySeries('x')],

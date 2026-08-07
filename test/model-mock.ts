@@ -51,6 +51,7 @@ export interface ScanChainMock {
   ge: jest.Mock;
   le: jest.Mock;
   beginsWith: jest.Mock;
+  in: jest.Mock;
   all: jest.Mock;
   exec: jest.Mock;
 }
@@ -63,6 +64,7 @@ function makeScanChain(exec: jest.Mock): ScanChainMock {
   chain.ge = jest.fn(() => chain);
   chain.le = jest.fn(() => chain);
   chain.beginsWith = jest.fn(() => chain);
+  chain.in = jest.fn(() => chain);
   chain.all = jest.fn(() => chain);
   return chain;
 }

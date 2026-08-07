@@ -2,15 +2,21 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { SessionsController } from '../../src/sessions/sessions.controller';
 import { SessionsService } from '../../src/sessions/sessions.service';
+import { TeamsService } from '../../src/teams/teams.service';
 import { SessionsModel } from '../../src/models/sessions.model';
+import { TeamsModel } from '../../src/models/teams.model';
 import { ModelMock, scanResolves } from '../model-mock';
 import { bootIntegrationApp } from './helpers';
 
 jest.mock('../../src/models/sessions.model', () => ({
   SessionsModel: require('../model-mock').makeModelMock(),
 }));
+jest.mock('../../src/models/teams.model', () => ({
+  TeamsModel: require('../model-mock').makeModelMock(),
+}));
 
 const Model = SessionsModel as unknown as ModelMock;
+const TeamModel = TeamsModel as unknown as ModelMock;
 
 describe('Sessions (integration)', () => {
   let app: INestApplication;
@@ -18,7 +24,7 @@ describe('Sessions (integration)', () => {
   beforeAll(async () => {
     app = await bootIntegrationApp({
       controllers: [SessionsController],
-      providers: [SessionsService],
+      providers: [SessionsService, TeamsService],
     });
   });
 
@@ -85,6 +91,62 @@ describe('Sessions (integration)', () => {
       .put('/sessions')
       .set('x-test-role', 'tutor')
       .send({ id: 's-2', tutor_id: 'other@example.com' });
+    expect(denied.status).toBe(403);
+  });
+
+  it('a lead with a team gets the whole team sessions on the parameterless GET', async () => {
+    TeamModel.scan.mockClear();
+    scanResolves(TeamModel, [
+      {
+        id: 'team-1',
+        name: 'Team A',
+        lead_contact_id: 'contact-lead',
+        member_contact_ids: ['contact-tutor'],
+      },
+    ]);
+    const chain = scanResolves(Model, [{ id: 's-1' }]);
+    const res = await request(server())
+      .get('/sessions')
+      .set('x-test-role', 'lead');
+    expect(res.status).toBe(200);
+    expect(TeamModel.scan).toHaveBeenCalledWith({
+      lead_contact_id: { eq: 'contact-lead' },
+    });
+    expect(chain.where).toHaveBeenCalledWith('tutor_id');
+    expect(chain.in).toHaveBeenCalledWith(['contact-lead', 'contact-tutor']);
+  });
+
+  it('a lead with no team gets their own sessions on the parameterless GET', async () => {
+    scanResolves(TeamModel, []);
+    scanResolves(Model, []);
+    const res = await request(server())
+      .get('/sessions')
+      .set('x-test-role', 'lead');
+    expect(res.status).toBe(200);
+    expect(Model.scan).toHaveBeenCalledWith({
+      tutor_id: { eq: 'contact-lead' },
+    });
+  });
+
+  it('a lead cannot fetch a specific other tutor directly', async () => {
+    const res = await request(server())
+      .get('/sessions?tutor=contact-tutor')
+      .set('x-test-role', 'lead');
+    expect(res.status).toBe(403);
+  });
+
+  it('a lead may update their own session but not a member session', async () => {
+    Model.update.mockResolvedValue({ id: 's-1' });
+    const ok = await request(server())
+      .put('/sessions')
+      .set('x-test-role', 'lead')
+      .send({ id: 's-1', tutor_id: 'contact-lead' });
+    expect(ok.status).toBe(200);
+
+    const denied = await request(server())
+      .put('/sessions')
+      .set('x-test-role', 'lead')
+      .send({ id: 's-2', tutor_id: 'contact-tutor' });
     expect(denied.status).toBe(403);
   });
 });

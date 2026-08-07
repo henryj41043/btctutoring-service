@@ -2,8 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import express from 'express';
 import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
+import { TeamsService } from '../teams/teams.service';
 import { User } from '../models/user.model';
 import { Session, SessionType } from '../models/session.model';
+import { Team } from '../models/team.model';
 
 const admin: User = {
   username: 'admin',
@@ -22,6 +24,12 @@ const stranger: User = {
   email: 'stranger@example.com',
   groups: [],
   contact: 'c-stranger',
+};
+const lead: User = {
+  username: 'lead',
+  email: 'lead@example.com',
+  groups: ['LeadTutors'],
+  contact: 'c-lead',
 };
 
 const reqAs = (user: User): express.Request =>
@@ -43,11 +51,13 @@ const session = (overrides: Partial<Session> = {}): Session =>
 describe('SessionsController', () => {
   let controller: SessionsController;
   let service: jest.Mocked<SessionsService>;
+  let teamsService: jest.Mocked<TeamsService>;
 
   beforeEach(async () => {
     const serviceMock: Partial<jest.Mocked<SessionsService>> = {
       getSessions: jest.fn(),
       getSessionsByTutor: jest.fn(),
+      getSessionsByTutors: jest.fn(),
       getSessionsByStudent: jest.fn(),
       getAllSessions: jest.fn(),
       getSessionsBySeries: jest.fn(),
@@ -56,12 +66,19 @@ describe('SessionsController', () => {
       updateSession: jest.fn(),
       deleteSession: jest.fn(),
     };
+    const teamsServiceMock: Partial<jest.Mocked<TeamsService>> = {
+      getTeamByLead: jest.fn(),
+    };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SessionsController],
-      providers: [{ provide: SessionsService, useValue: serviceMock }],
+      providers: [
+        { provide: SessionsService, useValue: serviceMock },
+        { provide: TeamsService, useValue: teamsServiceMock },
+      ],
     }).compile();
     controller = module.get(SessionsController);
     service = module.get(SessionsService);
+    teamsService = module.get(TeamsService);
   });
 
   it('should be defined', () => {
@@ -191,6 +208,130 @@ describe('SessionsController', () => {
       await expect(
         controller.getSessions(reqAs(stranger), '', '', '', '', ''),
       ).rejects.toThrow('Unauthorized');
+    });
+
+    it('plain tutor + no params -> still unauthorized (team read is lead-only)', async () => {
+      await expect(
+        controller.getSessions(reqAs(tutor), '', '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      expect(teamsService.getTeamByLead).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lead tutor team visibility', () => {
+    const teamOf = (members: string[]): Team =>
+      ({
+        id: 'team-1',
+        name: 'Team A',
+        lead_contact_id: 'c-lead',
+        member_contact_ids: members,
+      }) as Team;
+
+    it('lead + no params -> team sessions in one call, lead included', async () => {
+      teamsService.getTeamByLead.mockResolvedValue(teamOf(['c-m1', 'c-m2']));
+      await controller.getSessions(
+        reqAs(lead),
+        '',
+        '',
+        '',
+        '2026-01-01',
+        '2026-02-01',
+      );
+      expect(teamsService.getTeamByLead).toHaveBeenCalledWith('c-lead');
+      expect(service.getSessionsByTutors).toHaveBeenCalledWith(
+        ['c-lead', 'c-m1', 'c-m2'],
+        { from: '2026-01-01', to: '2026-02-01' },
+      );
+    });
+
+    it('dedupes a lead mistakenly listed among the members', async () => {
+      teamsService.getTeamByLead.mockResolvedValue(teamOf(['c-lead', 'c-m1']));
+      await controller.getSessions(reqAs(lead), '', '', '', '', '');
+      expect(service.getSessionsByTutors).toHaveBeenCalledWith(
+        ['c-lead', 'c-m1'],
+        undefined,
+      );
+    });
+
+    it('tolerates a team with no member list', async () => {
+      teamsService.getTeamByLead.mockResolvedValue({
+        id: 'team-1',
+        name: 'Team A',
+        lead_contact_id: 'c-lead',
+      } as Team);
+      await controller.getSessions(reqAs(lead), '', '', '', '', '');
+      expect(service.getSessionsByTutors).toHaveBeenCalledWith(
+        ['c-lead'],
+        undefined,
+      );
+    });
+
+    it('lead with no team degrades to their own sessions', async () => {
+      teamsService.getTeamByLead.mockResolvedValue(undefined);
+      await controller.getSessions(reqAs(lead), '', '', '', '2026-01-01', '');
+      expect(service.getSessionsByTutor).toHaveBeenCalledWith('c-lead', {
+        from: '2026-01-01',
+        to: undefined,
+      });
+      expect(service.getSessionsByTutors).not.toHaveBeenCalled();
+    });
+
+    it('lead may fetch their own sessions via ?tutor=self', async () => {
+      await controller.getSessions(reqAs(lead), 'c-lead', '', '', '', '');
+      expect(service.getSessionsByTutor).toHaveBeenCalledWith(
+        'c-lead',
+        undefined,
+      );
+    });
+
+    it('lead may fetch own tutor+student sessions', async () => {
+      await controller.getSessions(reqAs(lead), 'c-lead', 'stu-1', '', '', '');
+      expect(service.getSessions).toHaveBeenCalledWith(
+        'c-lead',
+        'stu-1',
+        undefined,
+      );
+    });
+
+    it('lead cannot fetch a member by ?tutor= directly', async () => {
+      await expect(
+        controller.getSessions(reqAs(lead), 'c-m1', '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('lead cannot fetch by student or series', async () => {
+      await expect(
+        controller.getSessions(reqAs(lead), '', 'stu-1', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getSessions(reqAs(lead), '', '', 'series-1', '', ''),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('lead updates their OWN session like any tutor', async () => {
+      await controller.updateSession(
+        reqAs(lead),
+        session({ tutor_id: 'c-lead' }),
+      );
+      expect(service.updateSession).toHaveBeenCalled();
+    });
+
+    it('lead cannot update a member session (read-only visibility)', async () => {
+      await expect(
+        controller.updateSession(reqAs(lead), session({ tutor_id: 'c-m1' })),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('lead cannot create or delete sessions', async () => {
+      await expect(
+        controller.createSession(reqAs(lead), session()),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createSessions(reqAs(lead), [session()]),
+      ).rejects.toThrow('Unauthorized');
+      await expect(controller.deleteSession(reqAs(lead), 's-1')).rejects.toThrow(
+        'Unauthorized',
+      );
     });
   });
 

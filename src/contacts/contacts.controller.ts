@@ -17,6 +17,7 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Contact } from '../models/contact.model';
+import { isTutorLike } from '../models/user-groups';
 
 @Controller('contacts')
 export class ContactsController {
@@ -46,10 +47,7 @@ export class ContactsController {
       // Any authenticated user may fetch their own contact record.
       // This is required by the login flow to load the user's profile.
       return this.contactsService.getContact(id);
-    } else if (
-      staff === 'true' &&
-      (user.groups ?? []).includes('Tutors')
-    ) {
+    } else if (staff === 'true' && isTutorLike(user.groups ?? [])) {
       // Tutors get a names-only staff list (for resolving tutor display
       // names) — never full records, which carry pay rates.
       const contacts = (await this.contactsService.getStaffContacts()) as {

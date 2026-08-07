@@ -73,6 +73,28 @@ export class SessionsService {
       });
   }
 
+  /**
+   * All sessions for a set of tutor contact ids (a lead's team view) in one
+   * scan pass. Chained .where().in() is required — the object-literal
+   * condition form has no `in`. DynamoDB caps IN at 100 operands; team sizes
+   * are nowhere near that.
+   */
+  async getSessionsByTutors(tutorIds: string[], range?: SessionRange) {
+    return this.applyRange(
+      SessionsModel.scan().where('tutor_id').in(tutorIds),
+      range,
+    )
+      .all()
+      .exec()
+      .then((sessions) => {
+        return sessions;
+      })
+      .catch((err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      });
+  }
+
   async getSessionsByStudent(student: string, range?: SessionRange) {
     return this.applyRange(
       SessionsModel.scan({
