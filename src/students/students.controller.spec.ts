@@ -18,6 +18,12 @@ const tutor: User = {
   contact: 'c-tutor',
 };
 
+const lead: User = {
+  username: 'lead',
+  email: 'lead@example.com',
+  groups: ['LeadTutors'],
+  contact: 'c-lead',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -125,6 +131,20 @@ describe('StudentsController', () => {
   });
 
   describe('getStudents tutor self-roster', () => {
+    it('a lead tutor lists their own assigned students (roster stays self-only)', async () => {
+      service.getStudentsByTutor.mockResolvedValue([student] as never);
+      const result = await controller.getStudents(reqAs(lead), '', '', 'c-lead', '');
+      expect(service.getStudentsByTutor).toHaveBeenCalledWith('c-lead');
+      expect(result).toEqual([student]);
+    });
+
+    it("a lead tutor cannot list a member's students", async () => {
+      await expect(
+        controller.getStudents(reqAs(lead), '', '', 'c-m1', ''),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getStudentsByTutor).not.toHaveBeenCalled();
+    });
+
     it('a tutor lists their own assigned students by contact id', async () => {
       const students = [student];
       service.getStudentsByTutor.mockResolvedValue(students as never);

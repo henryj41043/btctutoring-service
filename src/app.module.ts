@@ -12,6 +12,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { StudentsModule } from './students/students.module';
 import { NotesModule } from './notes/notes.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { TeamsModule } from './teams/teams.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
 
@@ -27,6 +28,7 @@ import { BillingModule } from './billing/billing.module';
     StudentsModule,
     NotesModule,
     RemindersModule,
+    TeamsModule,
     NotificationsModule,
     BillingModule,
   ],

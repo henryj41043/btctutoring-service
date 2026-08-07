@@ -24,6 +24,12 @@ const groupless: User = {
   groups: undefined as unknown as string[],
   contact: 'c-nogroups',
 };
+const lead: User = {
+  username: 'lead',
+  email: 'lead@example.com',
+  groups: ['LeadTutors'],
+  contact: 'c-lead',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -95,6 +101,18 @@ describe('NotesController', () => {
         controller.getNotes(reqAs(tutor), '', '', 'c-someone-else'),
       ).rejects.toThrow('Unauthorized');
       expect(service.getNotesByRecipient).not.toHaveBeenCalled();
+    });
+
+    it('a lead tutor reads the notes on their own contact record', async () => {
+      service.getNotesByRecipient.mockResolvedValue([] as never);
+      await controller.getNotes(reqAs(lead), '', '', 'c-lead');
+      expect(service.getNotesByRecipient).toHaveBeenCalledWith('c-lead');
+    });
+
+    it("a lead tutor cannot read another contact's notes", async () => {
+      await expect(
+        controller.getNotes(reqAs(lead), '', '', 'c-m1'),
+      ).rejects.toThrow('Unauthorized');
     });
   });
 

@@ -17,6 +17,7 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Note } from '../models/note.model';
+import { isTutorLike } from '../models/user-groups';
 
 @Controller('notes')
 export class NotesController {
@@ -36,7 +37,7 @@ export class NotesController {
     // Tutors may read the notes on their own contact record.
     if (
       !isAdmin &&
-      groups.includes('Tutors') &&
+      isTutorLike(groups) &&
       recipientId &&
       recipientId === user.contact
     ) {

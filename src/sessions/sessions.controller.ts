@@ -13,14 +13,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SessionsService, SessionRange } from './sessions.service';
+import { TeamsService } from '../teams/teams.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Session } from '../models/session.model';
+import { isLeadTutor, isTutorLike } from '../models/user-groups';
 
 @Controller('sessions')
 export class SessionsController {
-  constructor(private readonly sessionsService: SessionsService) {}
+  constructor(
+    private readonly sessionsService: SessionsService,
+    private readonly teamsService: TeamsService,
+  ) {}
 
   @Get()
   @UseGuards(AuthGuard('jwt'))
@@ -35,7 +40,9 @@ export class SessionsController {
     const user: User = req.user as User;
     const groups: string[] = user.groups ?? [];
     const isAdmin: boolean = groups.includes('Admins');
-    const isTutor: boolean = groups.includes('Tutors');
+    // Lead Tutors are tutors for self-access purposes; their extra power is
+    // only the parameterless team read below.
+    const tutorLike: boolean = isTutorLike(groups);
     // Sessions store tutor_id = the tutor's contact id (not their email).
     const idMatchesTutor: boolean = !!tutor && tutor === user.contact;
     // Optional start_datetime range; combinable with tutor/student filters.
@@ -47,11 +54,11 @@ export class SessionsController {
         return this.sessionsService.getSessionsBySeries(series);
       }
     } else if (tutor && student) {
-      if (isAdmin || (isTutor && idMatchesTutor)) {
+      if (isAdmin || (tutorLike && idMatchesTutor)) {
         return this.sessionsService.getSessions(tutor, student, range);
       }
     } else if (tutor) {
-      if (isAdmin || (isTutor && idMatchesTutor)) {
+      if (isAdmin || (tutorLike && idMatchesTutor)) {
         return this.sessionsService.getSessionsByTutor(tutor, range);
       }
     } else if (student) {
@@ -61,6 +68,21 @@ export class SessionsController {
     } else {
       if (isAdmin) {
         return this.sessionsService.getAllSessions(range);
+      }
+      if (isLeadTutor(groups)) {
+        // Lead Tutors: the parameterless GET returns the whole team's
+        // sessions. The team is resolved server-side so the client never
+        // asserts membership. The lead is included via user.contact (not the
+        // record's lead id) so a mis-pointed team can't widen access.
+        const team = await this.teamsService.getTeamByLead(user.contact);
+        if (!team) {
+          // No team yet — degrade to plain-tutor behavior (own sessions).
+          return this.sessionsService.getSessionsByTutor(user.contact, range);
+        }
+        const ids = [
+          ...new Set([user.contact, ...(team.member_contact_ids ?? [])]),
+        ];
+        return this.sessionsService.getSessionsByTutors(ids, range);
       }
     }
     Logger.error('Invalid parameters for given user credentials');
@@ -108,11 +130,13 @@ export class SessionsController {
     const user: User = req.user as User;
     const groups: string[] = user.groups ?? [];
     const isAdmin: boolean = groups.includes('Admins');
-    const isTutor: boolean = groups.includes('Tutors');
+    // Leads may edit their OWN sessions like any tutor — team visibility is
+    // read-only, so members' sessions never pass the id check below.
+    const tutorLike: boolean = isTutorLike(groups);
     // Sessions store tutor_id = the tutor's contact id (not their email).
     const idMatchesTutor: boolean =
       !!session.tutor_id && session.tutor_id === user.contact;
-    if (isAdmin || (isTutor && idMatchesTutor)) {
+    if (isAdmin || (tutorLike && idMatchesTutor)) {
       return this.sessionsService.updateSession(session);
     } else {
       Logger.error('Invalid credentials for the session being edited');
