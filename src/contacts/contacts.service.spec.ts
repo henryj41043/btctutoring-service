@@ -265,6 +265,7 @@ describe('ContactsService', () => {
   describe('updateContact', () => {
     it('updates and returns the contact', async () => {
       const updated = sampleContact({ first_name: 'Grace' });
+      scanResolves(Model, []); // email-uniqueness check finds nothing
       Model.update.mockResolvedValue(updated);
 
       const result = await service.updateContact(
@@ -288,7 +289,30 @@ describe('ContactsService', () => {
       expect(result).toBe(updated);
     });
 
+    it('rejects an edit that collides with another contact\'s email', async () => {
+      scanResolves(Model, [sampleContact({ id: 'other-contact' })]); // same email, different id
+      await expect(
+        service.updateContact(sampleContact({ id: 'contact-1' })),
+      ).rejects.toThrow('A contact with this email already exists.');
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('lets a contact keep their own email on update', async () => {
+      scanResolves(Model, [sampleContact({ id: 'contact-1' })]); // the record itself
+      Model.update.mockResolvedValue(sampleContact());
+      await expect(
+        service.updateContact(sampleContact({ id: 'contact-1' })),
+      ).resolves.toBeTruthy();
+    });
+
+    it('skips the uniqueness check when the payload has no email', async () => {
+      Model.update.mockResolvedValue(sampleContact());
+      await service.updateContact(sampleContact({ email: undefined }));
+      expect(Model.scan).not.toHaveBeenCalled();
+    });
+
     it('persists the hire type on update', async () => {
+      scanResolves(Model, []);
       Model.update.mockResolvedValue(sampleContact());
 
       await service.updateContact(sampleContact({ hire_type: '1099' }));
@@ -301,6 +325,7 @@ describe('ContactsService', () => {
     });
 
     it('rejects when update fails', async () => {
+      scanResolves(Model, []);
       Model.update.mockRejectedValue(new Error('update boom'));
       await expect(service.updateContact(sampleContact())).rejects.toThrow(
         'update boom',
@@ -308,6 +333,7 @@ describe('ContactsService', () => {
     });
 
     it('drops undefined fields so partial saves never erase stored values', async () => {
+      scanResolves(Model, []);
       Model.update.mockResolvedValue(sampleContact());
 
       // A non-admin save omits disabled controls — status arrives undefined.
@@ -330,6 +356,7 @@ describe('ContactsService', () => {
     });
 
     it('passes empty strings through so deliberate clears still work', async () => {
+      scanResolves(Model, []);
       Model.update.mockResolvedValue(sampleContact());
 
       await service.updateContact(sampleContact({ zoom_link: '' }));
