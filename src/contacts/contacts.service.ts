@@ -208,6 +208,14 @@ export class ContactsService {
   }
 
   async updateContact(contact: Contact) {
+    // Same uniqueness rule as create: an edit must not collide two contacts
+    // onto one email (the record being edited may of course keep its own).
+    if (contact.email) {
+      const existing = await this.findByEmail(contact.email);
+      if (existing && existing.id !== contact.id) {
+        throw new ConflictException('A contact with this email already exists.');
+      }
+    }
     return ContactsModel.update(
       {
         id: contact.id,
