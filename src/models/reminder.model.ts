@@ -14,4 +14,10 @@ export class Reminder {
   contact_id?: string;
   /** Contact id of the admin who created the reminder. */
   created_by?: string;
+  /** Optional 'due by' wall date 'YYYY-MM-DD'; display-only (table + digest). */
+  due_date?: string;
+  /** Absent = one-time. Recurring reminders advance `date` after each send. */
+  recurrence?: 'weekly' | 'monthly';
+  /** ISO timestamp; one-time reminders only (recurring never carry it). */
+  completed_at?: string;
 }

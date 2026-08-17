@@ -96,7 +96,8 @@ describe('RemindersService', () => {
       );
     });
 
-    it('updates via allowlist and re-arms sent_at', async () => {
+    it('re-arms sent_at and completed_at only when the date changes', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(
         dueReminder({ id: 'rem-9', sent_at: 'should-not-persist' }),
@@ -107,7 +108,26 @@ describe('RemindersService', () => {
         expect.objectContaining({ title: 'Call John' }),
       );
       expect(update.$SET.sent_at).toBeUndefined();
-      expect(update.$REMOVE).toContain('sent_at');
+      // Rescheduling re-arms fully: a completed reminder fires on its new day.
+      expect(update.$REMOVE).toEqual([
+        'sent_at', 'completed_at', 'contact_id', 'due_date', 'recurrence',
+      ]);
+    });
+
+    it('keeps sent_at when the date is unchanged (the v1 re-fire bug)', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9' })); // same date
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({ id: 'rem-9' }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$REMOVE).toEqual(['contact_id', 'due_date', 'recurrence']);
+    });
+
+    it('treats a missing stored record as a date change (safe re-arm)', async () => {
+      Model.get.mockResolvedValue(undefined);
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({ id: 'rem-9' }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$REMOVE[0]).toBe('sent_at');
     });
 
     it('persists a contact link on create and update', async () => {
@@ -117,22 +137,27 @@ describe('RemindersService', () => {
         expect.objectContaining({ contact_id: 'c-9' }),
       );
 
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(dueReminder({ id: 'rem-9', contact_id: 'c-9' }));
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET.contact_id).toBe('c-9');
-      expect(update.$REMOVE).toEqual(['sent_at']);
+      expect(update.$REMOVE).toEqual(['sent_at', 'completed_at', 'due_date', 'recurrence']);
     });
 
     it('clears the contact link when absent on update', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(dueReminder({ id: 'rem-9' }));
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET.contact_id).toBeUndefined();
-      expect(update.$REMOVE).toEqual(['sent_at', 'contact_id']);
+      expect(update.$REMOVE).toEqual([
+        'sent_at', 'completed_at', 'contact_id', 'due_date', 'recurrence',
+      ]);
     });
 
     it('propagates update failures', async () => {
+      Model.get.mockResolvedValue(dueReminder());
       Model.update.mockRejectedValue(new Error('update failed'));
       await expect(service.updateReminder(dueReminder())).rejects.toThrow(
         'update failed',
@@ -151,6 +176,127 @@ describe('RemindersService', () => {
       await expect(service.deleteReminder('rem-1')).rejects.toThrow(
         'delete failed',
       );
+    });
+  });
+
+  describe('v2 fields on create/update', () => {
+    it('passes due_date, recurrence, and created_by through on create', async () => {
+      Model.__save.mockResolvedValue({});
+      await service.createReminder(dueReminder({
+        due_date: '2026-08-20', recurrence: 'monthly', created_by: 'a-1',
+      }));
+      expect(Model).toHaveBeenCalledWith(expect.objectContaining({
+        due_date: '2026-08-20', recurrence: 'monthly', created_by: 'a-1',
+      }));
+    });
+
+    it('persists v2 fields on update; recurrence strips completed_at', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9' })); // same date
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({
+        id: 'rem-9', due_date: '2026-08-20', recurrence: 'weekly',
+        contact_id: 'c-9', created_by: 'a-2',
+      }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET).toEqual(expect.objectContaining({
+        due_date: '2026-08-20', recurrence: 'weekly', created_by: 'a-2',
+      }));
+      // Invariant: recurring reminders never carry a completion stamp.
+      expect(update.$REMOVE).toEqual(['completed_at']);
+    });
+
+    it('never strips created_by when the payload omits it', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9' }));
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(dueReminder({ id: 'rem-9' }));
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.created_by).toBeUndefined();
+      expect(update.$REMOVE).not.toContain('created_by');
+    });
+  });
+
+  describe('completeReminder / uncompleteReminder', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      // 14:00 ET — the same wall date in UTC and Eastern, so easternToday()
+      // agrees with the UTC date math in assertions.
+      jest.setSystemTime(new Date('2026-08-05T18:00:00Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('stamps completed_at on a one-time reminder', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-1' }));
+      Model.update.mockResolvedValue({});
+      const result = await service.completeReminder('rem-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { completed_at: expect.any(String) },
+      );
+      expect(result.message).toBe('Reminder completed.');
+    });
+
+    it('advances an on-time weekly reminder to next week', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', date: '2026-08-05', recurrence: 'weekly' }),
+      );
+      Model.update.mockResolvedValue({});
+      const result = await service.completeReminder('rem-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+      );
+      expect(result.message).toBe('Reminder occurrence completed.');
+    });
+
+    it('jumps an overdue weekly reminder to the first future occurrence', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', date: '2026-07-15', recurrence: 'weekly' }),
+      );
+      Model.update.mockResolvedValue({});
+      await service.completeReminder('rem-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+      );
+    });
+
+    it('advances an early-completed future occurrence from its own date', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', date: '2026-08-19', recurrence: 'weekly' }),
+      );
+      Model.update.mockResolvedValue({});
+      await service.completeReminder('rem-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $SET: { date: '2026-08-26' }, $REMOVE: ['sent_at'] },
+      );
+    });
+
+    it('404s on an unknown reminder', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.completeReminder('nope')).rejects.toThrow(
+        'Reminder not found',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('propagates a failed completion update', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-1' }));
+      Model.update.mockRejectedValue(new Error('complete boom'));
+      await expect(service.completeReminder('rem-1')).rejects.toThrow(
+        'complete boom',
+      );
+    });
+
+    it('uncomplete removes the stamp without a read', async () => {
+      Model.update.mockResolvedValue({});
+      const result = await service.uncompleteReminder('rem-1');
+      expect(Model.get).not.toHaveBeenCalled();
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $REMOVE: ['completed_at'] },
+      );
+      expect(result.message).toBe('Reminder reopened.');
     });
   });
 
@@ -275,4 +421,58 @@ describe('RemindersService', () => {
       expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
     });
   });
+  describe('cron v2 behaviors', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date('2026-08-05T18:00:00Z')); // 14:00 ET
+      process.env.SES_FROM_EMAIL = 'noreply@example.com';
+      sesMock.reset();
+      sesMock.on(SendEmailCommand).resolves({});
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('advances a recurring reminder instead of stamping sent_at', async () => {
+      scanResolves(Model, [
+        dueReminder({ id: 'rem-1', date: '2026-08-05', recurrence: 'weekly' }),
+      ]);
+      contactsService.getAdminContacts.mockResolvedValue([adminContact()] as never);
+      Model.update.mockResolvedValue({});
+      await service.sendDueReminders();
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+      );
+      // Never stamped — the series continues.
+      expect(Model.update).not.toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { sent_at: expect.any(String) },
+      );
+    });
+
+    it('skips one-time reminders completed early', async () => {
+      scanResolves(Model, [
+        dueReminder({ id: 'rem-1', date: '2026-08-05', completed_at: '2026-08-04T12:00:00Z' }),
+      ]);
+      await service.sendDueReminders();
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('appends the due-by suffix only when a due date exists', async () => {
+      scanResolves(Model, [
+        dueReminder({ id: 'rem-1', title: 'Bill Casey', message: '', date: '2026-08-05', due_date: '2026-08-20' }),
+        dueReminder({ id: 'rem-2', title: 'No due here', message: '', date: '2026-08-05' }),
+      ]);
+      contactsService.getAdminContacts.mockResolvedValue([adminContact()] as never);
+      Model.update.mockResolvedValue({});
+      await service.sendDueReminders();
+      const body = sesMock.commandCalls(SendEmailCommand)[0].args[0].input
+        .Message!.Body!.Text!.Data as string;
+      expect(body).toContain('Bill Casey (due Aug 20)');
+      expect(body).toContain('No due here');
+      expect(body).not.toContain('No due here (due');
+    });
+  });
+
 });

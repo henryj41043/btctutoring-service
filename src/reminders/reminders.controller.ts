@@ -66,6 +66,38 @@ export class RemindersController {
     }
   }
 
+  @Post(':id/complete')
+  @UseGuards(AuthGuard('jwt'))
+  async completeReminder(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+  ): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.remindersService.completeReminder(id);
+    } else {
+      Logger.error('User not authorized to complete reminders');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
+  @Post(':id/uncomplete')
+  @UseGuards(AuthGuard('jwt'))
+  async uncompleteReminder(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+  ): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.remindersService.uncompleteReminder(id);
+    } else {
+      Logger.error('User not authorized to reopen reminders');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
   async deleteReminder(

@@ -19,4 +19,13 @@ export const RemindersSchema = new dynamoose.Schema({
   // Set once the morning-of digest has been sent — the fire-once flag.
   sent_at: String,
   created_by: String,
+  // Optional 'due by' wall date 'YYYY-MM-DD' (display-only).
+  due_date: String,
+  // Absent = one-time; recurring reminders advance `date` after each send.
+  recurrence: {
+    type: String,
+    enum: ['weekly', 'monthly'],
+  },
+  // ISO completion stamp — one-time reminders only.
+  completed_at: String,
 });
