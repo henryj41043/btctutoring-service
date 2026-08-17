@@ -39,6 +39,8 @@ describe('RemindersController', () => {
       createReminder: jest.fn(),
       updateReminder: jest.fn(),
       deleteReminder: jest.fn(),
+      completeReminder: jest.fn(),
+      uncompleteReminder: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RemindersController],
@@ -70,6 +72,24 @@ describe('RemindersController', () => {
   it('admin can delete a reminder', async () => {
     await controller.deleteReminder(reqAs(admin), 'rem-1');
     expect(service.deleteReminder).toHaveBeenCalledWith('rem-1');
+  });
+
+  it('admin can complete and reopen a reminder', async () => {
+    await controller.completeReminder(reqAs(admin), 'rem-1');
+    expect(service.completeReminder).toHaveBeenCalledWith('rem-1');
+    await controller.uncompleteReminder(reqAs(admin), 'rem-1');
+    expect(service.uncompleteReminder).toHaveBeenCalledWith('rem-1');
+  });
+
+  it('non-admin cannot complete or reopen', async () => {
+    await expect(
+      controller.completeReminder(reqAs(tutor), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.uncompleteReminder(reqAs(tutor), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    expect(service.completeReminder).not.toHaveBeenCalled();
+    expect(service.uncompleteReminder).not.toHaveBeenCalled();
   });
 
   it('non-admin is rejected on every route', async () => {
