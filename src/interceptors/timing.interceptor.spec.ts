@@ -18,10 +18,7 @@ describe('TimingInterceptor', () => {
     interceptor = new TimingInterceptor();
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     // Deterministic duration: start reads 1000, finish reads 1145 → 145ms.
-    jest
-      .spyOn(Date, 'now')
-      .mockReturnValueOnce(1000)
-      .mockReturnValue(1145);
+    jest.spyOn(Date, 'now').mockReturnValueOnce(1000).mockReturnValue(1145);
   });
 
   afterEach(() => {

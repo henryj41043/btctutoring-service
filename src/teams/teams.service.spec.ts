@@ -1,16 +1,11 @@
 import { TeamsService } from './teams.service';
-import {
-  ModelMock,
-  scanRejects,
-  scanResolves,
-} from '../../test/model-mock';
+import { ModelMock, scanRejects, scanResolves } from '../../test/model-mock';
 import { Team } from '../models/team.model';
 
 jest.mock('../models/teams.model', () => ({
   TeamsModel: require('../../test/model-mock').makeModelMock(),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { TeamsModel: Model } = require('../models/teams.model') as {
   TeamsModel: ModelMock;
 };
@@ -171,9 +166,7 @@ describe('TeamsService', () => {
       scanResolves(Model, [team({ id: 'other-team' })]);
       await expect(
         service.createTeam(team({ id: undefined, member_contact_ids: [] })),
-      ).rejects.toThrow(
-        'Contact(s) already assigned to another team: c-lead',
-      );
+      ).rejects.toThrow('Contact(s) already assigned to another team: c-lead');
     });
 
     it('rejects when a member belongs to another team, naming the id', async () => {
@@ -192,9 +185,7 @@ describe('TeamsService', () => {
     });
 
     it('rejects when a member is another team lead', async () => {
-      scanResolves(Model, [
-        team({ id: 'other-team', member_contact_ids: [] }),
-      ]);
+      scanResolves(Model, [team({ id: 'other-team', member_contact_ids: [] })]);
       await expect(
         service.createTeam(
           team({
@@ -222,7 +213,11 @@ describe('TeamsService', () => {
       ]);
       Model.__save.mockResolvedValue(undefined);
       const result = await service.createTeam(
-        team({ id: undefined, lead_contact_id: 'c-new', member_contact_ids: [] }),
+        team({
+          id: undefined,
+          lead_contact_id: 'c-new',
+          member_contact_ids: [],
+        }),
       );
       expect(result.message).toBe('Team created successfully.');
     });

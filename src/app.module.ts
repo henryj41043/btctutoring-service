@@ -15,6 +15,7 @@ import { RemindersModule } from './reminders/reminders.module';
 import { TeamsModule } from './teams/teams.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
+import { EmailsModule } from './emails/emails.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { BillingModule } from './billing/billing.module';
     TeamsModule,
     NotificationsModule,
     BillingModule,
+    EmailsModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],

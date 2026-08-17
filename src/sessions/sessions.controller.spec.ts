@@ -144,14 +144,7 @@ describe('SessionsController', () => {
     });
 
     it('admin + tutor only -> getSessionsByTutor', async () => {
-      await controller.getSessions(
-        reqAs(admin),
-        'c-tutor',
-        '',
-        '',
-        '',
-        '',
-      );
+      await controller.getSessions(reqAs(admin), 'c-tutor', '', '', '', '');
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
         'c-tutor',
         undefined,
@@ -159,14 +152,7 @@ describe('SessionsController', () => {
     });
 
     it('owning tutor + tutor only -> getSessionsByTutor', async () => {
-      await controller.getSessions(
-        reqAs(tutor),
-        'c-tutor',
-        '',
-        '',
-        '',
-        '',
-      );
+      await controller.getSessions(reqAs(tutor), 'c-tutor', '', '', '', '');
       expect(service.getSessionsByTutor).toHaveBeenCalledWith(
         'c-tutor',
         undefined,
@@ -339,9 +325,9 @@ describe('SessionsController', () => {
       await expect(
         controller.createSessions(reqAs(lead), [session()]),
       ).rejects.toThrow('Unauthorized');
-      await expect(controller.deleteSession(reqAs(lead), 's-1')).rejects.toThrow(
-        'Unauthorized',
-      );
+      await expect(
+        controller.deleteSession(reqAs(lead), 's-1'),
+      ).rejects.toThrow('Unauthorized');
     });
   });
 
@@ -378,7 +364,9 @@ describe('SessionsController', () => {
     });
 
     it('owning tutor updates their own stored session', async () => {
-      service.getSessionById.mockResolvedValue(session({ tutor_id: 'c-tutor' }));
+      service.getSessionById.mockResolvedValue(
+        session({ tutor_id: 'c-tutor' }),
+      );
       await controller.updateSession(
         reqAs(tutor),
         session({ tutor_id: 'c-tutor' }),
@@ -404,7 +392,10 @@ describe('SessionsController', () => {
         session({ tutor_id: 'c-other-tutor' }),
       );
       await expect(
-        controller.updateSession(reqAs(tutor), session({ tutor_id: 'c-tutor' })),
+        controller.updateSession(
+          reqAs(tutor),
+          session({ tutor_id: 'c-tutor' }),
+        ),
       ).rejects.toThrow('Unauthorized');
       expect(service.getSessionById).toHaveBeenCalledWith('s-1');
       expect(service.updateSession).not.toHaveBeenCalled();
@@ -413,7 +404,10 @@ describe('SessionsController', () => {
     it('tutor cannot update a session that does not exist', async () => {
       service.getSessionById.mockResolvedValue(undefined);
       await expect(
-        controller.updateSession(reqAs(tutor), session({ tutor_id: 'c-tutor' })),
+        controller.updateSession(
+          reqAs(tutor),
+          session({ tutor_id: 'c-tutor' }),
+        ),
       ).rejects.toThrow('Unauthorized');
       expect(service.updateSession).not.toHaveBeenCalled();
     });

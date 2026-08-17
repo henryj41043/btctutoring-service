@@ -47,9 +47,7 @@ describe('ContactsService', () => {
       const contact = sampleContact();
       Model.get.mockResolvedValue(contact);
 
-      await expect(service.getContact('contact-1')).resolves.toEqual([
-        contact,
-      ]);
+      await expect(service.getContact('contact-1')).resolves.toEqual([contact]);
       expect(Model.get).toHaveBeenCalledWith('contact-1');
     });
 
@@ -60,9 +58,7 @@ describe('ContactsService', () => {
 
     it('rejects when the get fails', async () => {
       Model.get.mockRejectedValue(new Error('get boom'));
-      await expect(service.getContact('contact-1')).rejects.toThrow(
-        'get boom',
-      );
+      await expect(service.getContact('contact-1')).rejects.toThrow('get boom');
     });
   });
 
@@ -289,7 +285,7 @@ describe('ContactsService', () => {
       expect(result).toBe(updated);
     });
 
-    it('rejects an edit that collides with another contact\'s email', async () => {
+    it("rejects an edit that collides with another contact's email", async () => {
       scanResolves(Model, [sampleContact({ id: 'other-contact' })]); // same email, different id
       await expect(
         service.updateContact(sampleContact({ id: 'contact-1' })),

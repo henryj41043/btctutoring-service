@@ -213,7 +213,9 @@ export class ContactsService {
     if (contact.email) {
       const existing = await this.findByEmail(contact.email);
       if (existing && existing.id !== contact.id) {
-        throw new ConflictException('A contact with this email already exists.');
+        throw new ConflictException(
+          'A contact with this email already exists.',
+        );
       }
     }
     return ContactsModel.update(

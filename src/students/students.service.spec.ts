@@ -48,9 +48,7 @@ describe('StudentsService', () => {
     it('getStudent gets by key and wraps the item in an array', async () => {
       const student = sampleStudent();
       Model.get.mockResolvedValue(student);
-      await expect(service.getStudent('student-1')).resolves.toEqual([
-        student,
-      ]);
+      await expect(service.getStudent('student-1')).resolves.toEqual([student]);
       expect(Model.get).toHaveBeenCalledWith('student-1');
     });
 

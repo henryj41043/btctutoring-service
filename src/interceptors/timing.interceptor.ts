@@ -30,11 +30,7 @@ export class TimingInterceptor implements NestInterceptor {
     );
   }
 
-  private log(
-    request: express.Request,
-    status: number,
-    started: number,
-  ): void {
+  private log(request: express.Request, status: number, started: number): void {
     this.logger.log(
       `${request.method} ${request.url} ${status} ${Date.now() - started}ms`,
     );

@@ -122,7 +122,6 @@ describe('ContactsController', () => {
       ]);
     });
 
-
     it('a lead tutor with staff=true gets the same names-only list', async () => {
       service.getStaffContacts.mockResolvedValue([
         {

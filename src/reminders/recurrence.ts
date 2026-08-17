@@ -1,7 +1,8 @@
 export type Recurrence = 'weekly' | 'monthly';
 
 const DAY_MS = 86_400_000;
-const fmt = (utcMs: number): string => new Date(utcMs).toISOString().slice(0, 10);
+const fmt = (utcMs: number): string =>
+  new Date(utcMs).toISOString().slice(0, 10);
 
 /**
  * First occurrence of the series anchored at `anchor` that is STRICTLY after
