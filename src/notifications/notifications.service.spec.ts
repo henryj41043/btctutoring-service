@@ -73,7 +73,9 @@ describe('NotificationsService', () => {
       .mockImplementation(() => undefined);
     sessionsService.getAllSessions.mockResolvedValue([] as never);
     await service.sendPendingSessionReminders();
-    expect(logSpy).toHaveBeenCalledWith('Running pending session reminder job...');
+    expect(logSpy).toHaveBeenCalledWith(
+      'Running pending session reminder job...',
+    );
     logSpy.mockRestore();
   });
 
@@ -82,9 +84,9 @@ describe('NotificationsService', () => {
     // 18:00 UTC / 14:00 ET — mid-afternoon in both CI (UTC) and local (ET).
     jest.setSystemTime(new Date('2026-08-05T18:00:00Z'));
     try {
-    contactsService.getContact.mockResolvedValue([
-      { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
-    ] as never);
+      contactsService.getContact.mockResolvedValue([
+        { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
+      ] as never);
       const localMidnight = new Date();
       localMidnight.setHours(0, 0, 0, 0);
       sessionsService.getAllSessions.mockResolvedValue([
@@ -115,9 +117,11 @@ describe('NotificationsService', () => {
         sessionsService as never,
         contactsService as never,
       );
-      const configuredRegion = (configured as unknown as {
-        ses: { config: { region: () => Promise<string> } };
-      }).ses.config.region;
+      const configuredRegion = (
+        configured as unknown as {
+          ses: { config: { region: () => Promise<string> } };
+        }
+      ).ses.config.region;
       await expect(configuredRegion()).resolves.toBe('eu-test-1');
 
       delete process.env.AWS_DEFAULT_REGION;
@@ -125,9 +129,11 @@ describe('NotificationsService', () => {
         sessionsService as never,
         contactsService as never,
       );
-      const fallbackRegion = (fallback as unknown as {
-        ses: { config: { region: () => Promise<string> } };
-      }).ses.config.region;
+      const fallbackRegion = (
+        fallback as unknown as {
+          ses: { config: { region: () => Promise<string> } };
+        }
+      ).ses.config.region;
       await expect(fallbackRegion()).resolves.toBe('us-east-1');
     } finally {
       if (originalRegion === undefined) {
@@ -196,8 +202,16 @@ describe('NotificationsService', () => {
       .mockImplementation(() => undefined);
     sessionsService.getAllSessions.mockResolvedValue([
       // Deliberately out of order; 'b' has no student name.
-      stale({ id: 'a', start_datetime: '2020-01-05T15:00:00Z', student_name: 'Pat' }),
-      stale({ id: 'b', start_datetime: '2020-01-03T14:30:00Z', student_name: undefined }),
+      stale({
+        id: 'a',
+        start_datetime: '2020-01-05T15:00:00Z',
+        student_name: 'Pat',
+      }),
+      stale({
+        id: 'b',
+        start_datetime: '2020-01-03T14:30:00Z',
+        student_name: undefined,
+      }),
     ] as never);
     contactsService.getContact.mockResolvedValue([
       { email: 'tess@example.com', first_name: 'Tess' },

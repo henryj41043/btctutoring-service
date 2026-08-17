@@ -97,7 +97,9 @@ describe('RemindersService', () => {
     });
 
     it('re-arms sent_at and completed_at only when the date changes', async () => {
-      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-9', date: '2000-01-01' }),
+      );
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(
         dueReminder({ id: 'rem-9', sent_at: 'should-not-persist' }),
@@ -110,7 +112,11 @@ describe('RemindersService', () => {
       expect(update.$SET.sent_at).toBeUndefined();
       // Rescheduling re-arms fully: a completed reminder fires on its new day.
       expect(update.$REMOVE).toEqual([
-        'sent_at', 'completed_at', 'contact_id', 'due_date', 'recurrence',
+        'sent_at',
+        'completed_at',
+        'contact_id',
+        'due_date',
+        'recurrence',
       ]);
     });
 
@@ -137,22 +143,37 @@ describe('RemindersService', () => {
         expect.objectContaining({ contact_id: 'c-9' }),
       );
 
-      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-9', date: '2000-01-01' }),
+      );
       Model.update.mockResolvedValue(dueReminder());
-      await service.updateReminder(dueReminder({ id: 'rem-9', contact_id: 'c-9' }));
+      await service.updateReminder(
+        dueReminder({ id: 'rem-9', contact_id: 'c-9' }),
+      );
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET.contact_id).toBe('c-9');
-      expect(update.$REMOVE).toEqual(['sent_at', 'completed_at', 'due_date', 'recurrence']);
+      expect(update.$REMOVE).toEqual([
+        'sent_at',
+        'completed_at',
+        'due_date',
+        'recurrence',
+      ]);
     });
 
     it('clears the contact link when absent on update', async () => {
-      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9', date: '2000-01-01' }));
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-9', date: '2000-01-01' }),
+      );
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(dueReminder({ id: 'rem-9' }));
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET.contact_id).toBeUndefined();
       expect(update.$REMOVE).toEqual([
-        'sent_at', 'completed_at', 'contact_id', 'due_date', 'recurrence',
+        'sent_at',
+        'completed_at',
+        'contact_id',
+        'due_date',
+        'recurrence',
       ]);
     });
 
@@ -182,25 +203,42 @@ describe('RemindersService', () => {
   describe('v2 fields on create/update', () => {
     it('passes due_date, recurrence, and created_by through on create', async () => {
       Model.__save.mockResolvedValue({});
-      await service.createReminder(dueReminder({
-        due_date: '2026-08-20', recurrence: 'monthly', created_by: 'a-1',
-      }));
-      expect(Model).toHaveBeenCalledWith(expect.objectContaining({
-        due_date: '2026-08-20', recurrence: 'monthly', created_by: 'a-1',
-      }));
+      await service.createReminder(
+        dueReminder({
+          due_date: '2026-08-20',
+          recurrence: 'monthly',
+          created_by: 'a-1',
+        }),
+      );
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({
+          due_date: '2026-08-20',
+          recurrence: 'monthly',
+          created_by: 'a-1',
+        }),
+      );
     });
 
     it('persists v2 fields on update; recurrence strips completed_at', async () => {
       Model.get.mockResolvedValue(dueReminder({ id: 'rem-9' })); // same date
       Model.update.mockResolvedValue(dueReminder());
-      await service.updateReminder(dueReminder({
-        id: 'rem-9', due_date: '2026-08-20', recurrence: 'weekly',
-        contact_id: 'c-9', created_by: 'a-2',
-      }));
+      await service.updateReminder(
+        dueReminder({
+          id: 'rem-9',
+          due_date: '2026-08-20',
+          recurrence: 'weekly',
+          contact_id: 'c-9',
+          created_by: 'a-2',
+        }),
+      );
       const [, update] = Model.update.mock.calls.at(-1)!;
-      expect(update.$SET).toEqual(expect.objectContaining({
-        due_date: '2026-08-20', recurrence: 'weekly', created_by: 'a-2',
-      }));
+      expect(update.$SET).toEqual(
+        expect.objectContaining({
+          due_date: '2026-08-20',
+          recurrence: 'weekly',
+          created_by: 'a-2',
+        }),
+      );
       // Invariant: recurring reminders never carry a completion stamp.
       expect(update.$REMOVE).toEqual(['completed_at']);
     });
@@ -435,7 +473,9 @@ describe('RemindersService', () => {
       scanResolves(Model, [
         dueReminder({ id: 'rem-1', date: '2026-08-05', recurrence: 'weekly' }),
       ]);
-      contactsService.getAdminContacts.mockResolvedValue([adminContact()] as never);
+      contactsService.getAdminContacts.mockResolvedValue([
+        adminContact(),
+      ] as never);
       Model.update.mockResolvedValue({});
       await service.sendDueReminders();
       expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
@@ -452,7 +492,11 @@ describe('RemindersService', () => {
 
     it('skips one-time reminders completed early', async () => {
       scanResolves(Model, [
-        dueReminder({ id: 'rem-1', date: '2026-08-05', completed_at: '2026-08-04T12:00:00Z' }),
+        dueReminder({
+          id: 'rem-1',
+          date: '2026-08-05',
+          completed_at: '2026-08-04T12:00:00Z',
+        }),
       ]);
       await service.sendDueReminders();
       expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
@@ -461,10 +505,23 @@ describe('RemindersService', () => {
 
     it('appends the due-by suffix only when a due date exists', async () => {
       scanResolves(Model, [
-        dueReminder({ id: 'rem-1', title: 'Bill Casey', message: '', date: '2026-08-05', due_date: '2026-08-20' }),
-        dueReminder({ id: 'rem-2', title: 'No due here', message: '', date: '2026-08-05' }),
+        dueReminder({
+          id: 'rem-1',
+          title: 'Bill Casey',
+          message: '',
+          date: '2026-08-05',
+          due_date: '2026-08-20',
+        }),
+        dueReminder({
+          id: 'rem-2',
+          title: 'No due here',
+          message: '',
+          date: '2026-08-05',
+        }),
       ]);
-      contactsService.getAdminContacts.mockResolvedValue([adminContact()] as never);
+      contactsService.getAdminContacts.mockResolvedValue([
+        adminContact(),
+      ] as never);
       Model.update.mockResolvedValue({});
       await service.sendDueReminders();
       const body = sesMock.commandCalls(SendEmailCommand)[0].args[0].input
@@ -474,5 +531,4 @@ describe('RemindersService', () => {
       expect(body).not.toContain('No due here (due');
     });
   });
-
 });

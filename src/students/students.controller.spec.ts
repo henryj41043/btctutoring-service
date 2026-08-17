@@ -133,7 +133,13 @@ describe('StudentsController', () => {
   describe('getStudents tutor self-roster', () => {
     it('a lead tutor lists their own assigned students (roster stays self-only)', async () => {
       service.getStudentsByTutor.mockResolvedValue([student] as never);
-      const result = await controller.getStudents(reqAs(lead), '', '', 'c-lead', '');
+      const result = await controller.getStudents(
+        reqAs(lead),
+        '',
+        '',
+        'c-lead',
+        '',
+      );
       expect(service.getStudentsByTutor).toHaveBeenCalledWith('c-lead');
       expect(result).toEqual([student]);
     });

@@ -30,7 +30,9 @@ describe('Teams (integration)', () => {
 
   it('admin lists teams', async () => {
     scanResolves(Model, [{ id: 'team-1', name: 'Team A' }]);
-    const res = await request(server()).get('/teams').set('x-test-role', 'admin');
+    const res = await request(server())
+      .get('/teams')
+      .set('x-test-role', 'admin');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ id: 'team-1', name: 'Team A' }]);
   });
@@ -85,7 +87,9 @@ describe('Teams (integration)', () => {
   it.each(['tutor', 'lead', 'none'])(
     'a %s user is rejected on every route',
     async (role) => {
-      const list = await request(server()).get('/teams').set('x-test-role', role);
+      const list = await request(server())
+        .get('/teams')
+        .set('x-test-role', role);
       expect(list.status).toBe(403);
       const create = await request(server())
         .post('/teams')
@@ -95,7 +99,12 @@ describe('Teams (integration)', () => {
       const update = await request(server())
         .put('/teams')
         .set('x-test-role', role)
-        .send({ id: 'team-1', name: 'X', lead_contact_id: 'c', member_contact_ids: [] });
+        .send({
+          id: 'team-1',
+          name: 'X',
+          lead_contact_id: 'c',
+          member_contact_ids: [],
+        });
       expect(update.status).toBe(403);
       const del = await request(server())
         .delete('/teams/team-1')

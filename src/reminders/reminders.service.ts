@@ -155,7 +155,10 @@ export class RemindersService {
         await this.advanceRecurring(stored, this.easternToday());
         return { id, message: 'Reminder occurrence completed.' };
       }
-      await RemindersModel.update({ id }, { completed_at: new Date().toISOString() });
+      await RemindersModel.update(
+        { id },
+        { completed_at: new Date().toISOString() },
+      );
       return { id, message: 'Reminder completed.' };
     } catch (error) {
       Logger.error((error as Error).message, error);
