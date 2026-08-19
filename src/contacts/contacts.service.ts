@@ -54,7 +54,8 @@ export class ContactsService {
         const page = (await this.documentClient.send(
           new ScanCommand({
             TableName: 'BTCTutoring-Contacts-Table',
-            ProjectionExpression: '#id, #fn, #ln, #em, #ph, #sv, #ug, #st',
+            ProjectionExpression:
+              '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst',
             ExpressionAttributeNames: {
               '#id': 'id',
               '#fn': 'first_name',
@@ -64,6 +65,9 @@ export class ContactsService {
               '#sv': 'service',
               '#ug': 'user_group',
               '#st': 'status',
+              // Scholarship flag + state feed the contacts-table filter.
+              '#ss': 'scholarship_student',
+              '#sst': 'scholarship_state',
             },
             ExclusiveStartKey: lastKey,
           }),
