@@ -168,13 +168,14 @@ export class StudentsService {
   }
 
   /**
-   * Denormalizes each student with their family's (contact's) display name so
-   * list views (e.g. the roster) can show a Parent column without a
-   * client-side join. Mirrors the onboarding view's server-side join.
+   * Denormalizes each student with their family's (contact's) display name
+   * and email so list views (e.g. the roster) can show a Parent column and
+   * copy caseload emails without a client-side join. Authz-safe by
+   * construction: callers only ever pass students the requester may see.
    */
   async withContactNames(
     students: Student[],
-  ): Promise<(Student & { contact_name: string })[]> {
+  ): Promise<(Student & { contact_name: string; contact_email: string })[]> {
     const contactIds = [
       ...new Set(students.map((s) => s.contact_id).filter(Boolean)),
     ];
@@ -184,7 +185,10 @@ export class StudentsService {
       const contactName = contact
         ? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim()
         : '';
-      return Object.assign({}, student, { contact_name: contactName });
+      return Object.assign({}, student, {
+        contact_name: contactName,
+        contact_email: contact?.email ?? '',
+      });
     });
   }
 
