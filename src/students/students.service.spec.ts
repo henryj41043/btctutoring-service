@@ -172,10 +172,15 @@ describe('StudentsService', () => {
       Contacts.batchGet.mockReset();
     });
 
-    it('joins each student to their family display name (deduped lookup)', async () => {
+    it('joins each student to their family display name + email (deduped lookup)', async () => {
       Contacts.batchGet.mockResolvedValue([
-        { id: 'c1', first_name: 'Ann', last_name: 'Lee' },
-        // last_name absent — trimmed, no trailing space.
+        {
+          id: 'c1',
+          first_name: 'Ann',
+          last_name: 'Lee',
+          email: 'ann@example.com',
+        },
+        // last_name + email absent — trimmed name, blank email.
         { id: 'c2', first_name: 'Bob' },
       ]);
       const rows = await service.withContactNames([
@@ -192,17 +197,24 @@ describe('StudentsService', () => {
         'Bob',
         '',
       ]);
+      expect(rows.map((r) => r.contact_email)).toEqual([
+        'ann@example.com',
+        'ann@example.com',
+        '',
+        '',
+      ]);
       // The student's own fields survive the merge.
       expect(rows[0].name).toBe('Kid One');
       expect(rows[0].id).toBe('s1');
     });
 
-    it('returns an empty contact_name when the contact is missing', async () => {
+    it('returns empty contact fields when the contact is missing', async () => {
       Contacts.batchGet.mockResolvedValue([]);
       const rows = await service.withContactNames([
         sampleStudent({ id: 's1', contact_id: 'c-gone' }),
       ]);
       expect(rows[0].contact_name).toBe('');
+      expect(rows[0].contact_email).toBe('');
     });
 
     it('skips the lookup entirely for an empty list', async () => {
