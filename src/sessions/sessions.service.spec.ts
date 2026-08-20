@@ -1,14 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { mockClient } from 'aws-sdk-client-mock';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SessionsService } from './sessions.service';
 import { SessionsModel } from '../models/sessions.model';
+import { StudentsModel } from '../models/students.model';
+import { ContactsModel } from '../models/contacts.model';
 import { Session, SessionType } from '../models/session.model';
 import { ModelMock, scanRejects, scanResolves } from '../../test/model-mock';
 
 jest.mock('../models/sessions.model', () => ({
   SessionsModel: require('../../test/model-mock').makeModelMock(),
 }));
+jest.mock('../models/students.model', () => ({
+  StudentsModel: require('../../test/model-mock').makeModelMock(),
+}));
+jest.mock('../models/contacts.model', () => ({
+  ContactsModel: require('../../test/model-mock').makeModelMock(),
+}));
 
 const Model = SessionsModel as unknown as ModelMock;
+const Students = StudentsModel as unknown as ModelMock;
+const Contacts = ContactsModel as unknown as ModelMock;
+const sesMock = mockClient(SESClient);
 
 const sampleSession = (overrides: Partial<Session> = {}): Session =>
   ({
@@ -269,6 +283,154 @@ describe('SessionsService', () => {
       Model.delete.mockRejectedValue(new Error('delete boom'));
       await expect(service.deleteSession('session-1')).rejects.toThrow(
         'delete boom',
+      );
+    });
+  });
+
+  describe('emailSessionNotes', () => {
+    const completed = (overrides: Partial<Session> = {}): Session =>
+      sampleSession({
+        status: 'Completed',
+        notes: 'Great progress on fractions today.',
+        ...overrides,
+      });
+
+    beforeEach(() => {
+      sesMock.reset();
+      sesMock.on(SendEmailCommand).resolves({});
+      process.env.SES_FROM_EMAIL = 'noreply@example.com';
+      Model.get.mockResolvedValue(completed());
+      Model.update.mockResolvedValue({});
+      Students.get.mockResolvedValue({
+        id: 'student-1',
+        name: 'Pat',
+        contact_id: 'c-1',
+      });
+      Contacts.get.mockResolvedValue({
+        id: 'c-1',
+        first_name: 'Jane',
+        email: 'jane@example.com',
+      });
+    });
+
+    afterEach(() => {
+      delete process.env.SES_FROM_EMAIL;
+    });
+
+    it('emails the stored notes to the family and stamps notes_emailed_at', async () => {
+      const result = await service.emailSessionNotes('session-1');
+      expect(result.message).toBe('Session notes emailed.');
+      expect(result.notes_emailed_at).toEqual(expect.any(String));
+
+      const send = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+      expect(send.Source).toBe('noreply@example.com');
+      expect(send.Destination?.ToAddresses).toEqual(['jane@example.com']);
+      expect(send.Message?.Subject?.Data).toBe(
+        'Session notes for Pat — January 1, 2026',
+      );
+      expect(send.Message?.Body?.Text?.Data).toContain('Hi Jane,');
+      expect(send.Message?.Body?.Text?.Data).toContain(
+        'Great progress on fractions today.',
+      );
+      expect(send.Message?.Body?.Text?.Data).toContain('with Tess');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'session-1' },
+        { notes_emailed_at: expect.any(String) },
+      );
+    });
+
+    it('falls back to the student record name and a tutor-less line', async () => {
+      Model.get.mockResolvedValue(
+        completed({ student_name: undefined, tutor_name: undefined }),
+      );
+      await service.emailSessionNotes('session-1');
+      const send = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+      expect(send.Message?.Subject?.Data).toContain('Session notes for Pat');
+      expect(send.Message?.Body?.Text?.Data).not.toContain('with ');
+    });
+
+    it('greets "there" when the contact has no first name', async () => {
+      Contacts.get.mockResolvedValue({ id: 'c-1', email: 'jane@example.com' });
+      await service.emailSessionNotes('session-1');
+      const send = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+      expect(send.Message?.Body?.Text?.Data).toContain('Hi there,');
+    });
+
+    it('fails closed when SES_FROM_EMAIL is unset (before any lookup)', async () => {
+      delete process.env.SES_FROM_EMAIL;
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'Email sending is not configured',
+      );
+      expect(Model.get).not.toHaveBeenCalled();
+    });
+
+    it('404s on a missing session', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.emailSessionNotes('nope')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it.each([
+      ['whitespace-only', '   '],
+      ['absent', undefined],
+    ])('refuses a session with %s notes', async (_label, notes) => {
+      Model.get.mockResolvedValue(completed({ notes: notes as never }));
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    });
+
+    it('refuses a session with no student', async () => {
+      Model.get.mockResolvedValue(completed({ student_id: undefined }));
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'This session has no student.',
+      );
+    });
+
+    it('404s when the student has no family contact', async () => {
+      Students.get.mockResolvedValue({ id: 'student-1', name: 'Pat' });
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'No family contact for this student.',
+      );
+    });
+
+    it('404s when the family contact has no email', async () => {
+      Contacts.get.mockResolvedValue({ id: 'c-1', first_name: 'Jane' });
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'The family contact has no email address.',
+      );
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    });
+
+    it('propagates an SES failure without stamping', async () => {
+      sesMock.on(SendEmailCommand).rejects(new Error('ses down'));
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'ses down',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('a failed stamp write never fails the request (email already sent)', async () => {
+      Model.update.mockRejectedValue(new Error('ddb write throttled'));
+      const result = await service.emailSessionNotes('session-1');
+      expect(result.message).toBe('Session notes emailed.');
+    });
+
+    it.each([
+      [
+        'student lookup',
+        () => Students.get.mockRejectedValue(new Error('boom')),
+      ],
+      [
+        'contact lookup',
+        () => Contacts.get.mockRejectedValue(new Error('boom')),
+      ],
+    ])('propagates a %s failure', async (_label, arm) => {
+      arm();
+      await expect(service.emailSessionNotes('session-1')).rejects.toThrow(
+        'boom',
       );
     });
   });

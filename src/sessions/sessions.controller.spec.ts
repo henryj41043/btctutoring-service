@@ -57,6 +57,7 @@ describe('SessionsController', () => {
     const serviceMock: Partial<jest.Mocked<SessionsService>> = {
       getSessions: jest.fn(),
       getSessionById: jest.fn(),
+      emailSessionNotes: jest.fn(),
       getSessionsByTutor: jest.fn(),
       getSessionsByTutors: jest.fn(),
       getSessionsByStudent: jest.fn(),
@@ -385,6 +386,46 @@ describe('SessionsController', () => {
           session({ type: SessionType.MAKE_UP, tutor_id: 'c-stranger' }),
         ),
       ).rejects.toThrow('Unauthorized');
+    });
+
+    it('admin emails session notes without an ownership lookup', async () => {
+      service.emailSessionNotes.mockResolvedValue({ id: 's-1' } as never);
+      await controller.emailSessionNotes(reqAs(admin), 's-1');
+      expect(service.emailSessionNotes).toHaveBeenCalledWith('s-1');
+      expect(service.getSessionById).not.toHaveBeenCalled();
+    });
+
+    it('tutor emails notes for their OWN stored session', async () => {
+      service.getSessionById.mockResolvedValue(
+        session({ tutor_id: 'c-tutor' }),
+      );
+      service.emailSessionNotes.mockResolvedValue({ id: 's-1' } as never);
+      await controller.emailSessionNotes(reqAs(tutor), 's-1');
+      expect(service.emailSessionNotes).toHaveBeenCalledWith('s-1');
+    });
+
+    it("tutor cannot email notes for someone else's session", async () => {
+      service.getSessionById.mockResolvedValue(
+        session({ tutor_id: 'c-other' }),
+      );
+      await expect(
+        controller.emailSessionNotes(reqAs(tutor), 's-1'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.emailSessionNotes).not.toHaveBeenCalled();
+    });
+
+    it('tutor cannot email notes for a missing session', async () => {
+      service.getSessionById.mockResolvedValue(undefined);
+      await expect(
+        controller.emailSessionNotes(reqAs(tutor), 'nope'),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('groupless user cannot email notes at all', async () => {
+      await expect(
+        controller.emailSessionNotes(reqAs(stranger), 's-1'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getSessionById).not.toHaveBeenCalled();
     });
 
     it('admin batch-creates sessions', async () => {
