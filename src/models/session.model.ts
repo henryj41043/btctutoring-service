@@ -18,4 +18,6 @@ export class Session {
   tutor_id: string;
   tutor_name: string;
   series_id?: string;
+  /** Last time the notes were emailed to the parent (re-sends allowed). */
+  notes_emailed_at?: string;
 }

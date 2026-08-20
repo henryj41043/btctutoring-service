@@ -163,6 +163,30 @@ export class SessionsController {
     throw new ForbiddenException('Unauthorized');
   }
 
+  @Post(':id/email-notes')
+  @UseGuards(AuthGuard('jwt'))
+  async emailSessionNotes(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+  ): Promise<any> {
+    const user: User = req.user as User;
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
+    if (isAdmin) {
+      return this.sessionsService.emailSessionNotes(id);
+    }
+    // A tutor may email the notes of their OWN sessions only — ownership is
+    // checked against the STORED session (updateSession precedent).
+    if (isTutorLike(groups)) {
+      const stored = await this.sessionsService.getSessionById(id);
+      if (stored && stored.tutor_id === user.contact) {
+        return this.sessionsService.emailSessionNotes(id);
+      }
+    }
+    Logger.error('Invalid credentials for emailing session notes');
+    throw new ForbiddenException('Unauthorized');
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
   async deleteSession(

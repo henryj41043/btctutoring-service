@@ -1,6 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { SessionsModel } from '../models/sessions.model';
+import { StudentsModel } from '../models/students.model';
+import { ContactsModel } from '../models/contacts.model';
 import { Session } from '../models/session.model';
+import { Student } from '../models/student.model';
+import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
 
 /** Optional start_datetime range (ISO strings; ISO sorts lexically). */
@@ -11,6 +22,10 @@ export interface SessionRange {
 
 @Injectable()
 export class SessionsService {
+  private readonly ses = new SESClient({
+    region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
+  });
+
   /**
    * Applies an optional start_datetime range to a scan. ISO-8601 strings
    * compare lexically, so plain string bounds are correct.
@@ -34,6 +49,98 @@ export class SessionsService {
       return scan.where('start_datetime').le(range.to) as T;
     }
     return scan;
+  }
+
+  /**
+   * Emails the session's notes to the student's parent (opt-in from the
+   * dialog after attendance is completed). Sends the STORED notes — callers
+   * persist their edit first, then request the send. Stamps notes_emailed_at
+   * for display, but deliberate re-sends are allowed (a tutor may amend the
+   * notes and email again).
+   */
+  async emailSessionNotes(id: string) {
+    // Fail closed before any lookups — a config gap reads as a 500, not a
+    // half-done send.
+    const fromEmail = process.env.SES_FROM_EMAIL;
+    if (!fromEmail) {
+      Logger.error('SES_FROM_EMAIL is not set — cannot email session notes.');
+      throw new InternalServerErrorException('Email sending is not configured');
+    }
+    const session = await this.getSessionById(id);
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+    const notes = (session.notes ?? '').trim();
+    if (!notes) {
+      throw new BadRequestException('This session has no notes to email.');
+    }
+    if (!session.student_id) {
+      throw new BadRequestException('This session has no student.');
+    }
+    const student = (await StudentsModel.get(session.student_id).catch(
+      (err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      },
+    )) as unknown as Student | undefined;
+    if (!student?.contact_id) {
+      throw new NotFoundException('No family contact for this student.');
+    }
+    const contact = (await ContactsModel.get(student.contact_id).catch(
+      (err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      },
+    )) as unknown as Contact | undefined;
+    if (!contact?.email) {
+      throw new NotFoundException('The family contact has no email address.');
+    }
+
+    const studentName = session.student_name || student.name || 'your student';
+    const sessionDate = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(session.start_datetime));
+    const body = [
+      `Hi ${contact.first_name || 'there'},`,
+      ``,
+      `Here are the notes from ${studentName}'s session on ${sessionDate}` +
+        `${session.tutor_name ? ` with ${session.tutor_name}` : ''}:`,
+      ``,
+      notes,
+      ``,
+      `— Beyond the Chalkboard Tutoring`,
+    ].join('\n');
+
+    await this.ses
+      .send(
+        new SendEmailCommand({
+          Source: fromEmail,
+          Destination: { ToAddresses: [contact.email] },
+          Message: {
+            Subject: {
+              Data: `Session notes for ${studentName} — ${sessionDate}`,
+              Charset: 'UTF-8',
+            },
+            Body: { Text: { Data: body, Charset: 'UTF-8' } },
+          },
+        }),
+      )
+      .catch((err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      });
+
+    // Best-effort stamp: the email is already out, so a failed write only
+    // costs the display hint — never fail the request over it.
+    const now = new Date().toISOString();
+    await SessionsModel.update({ id }, { notes_emailed_at: now }).catch(
+      (err: Error) =>
+        Logger.error(`Failed to stamp notes_emailed_at: ${err.message}`, err),
+    );
+    return { id, message: 'Session notes emailed.', notes_emailed_at: now };
   }
 
   /** Keyed GetItem for one session, or undefined when the id is unknown. */
