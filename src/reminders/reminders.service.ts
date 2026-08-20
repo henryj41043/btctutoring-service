@@ -43,6 +43,7 @@ export class RemindersService {
       created_by: reminder.created_by,
       due_date: reminder.due_date,
       recurrence: reminder.recurrence,
+      note: reminder.note,
     });
     return newReminder
       .save()
@@ -95,6 +96,11 @@ export class RemindersService {
     } else {
       removals.push('due_date');
     }
+    if (reminder.note) {
+      base.note = reminder.note;
+    } else {
+      removals.push('note');
+    }
     if (reminder.recurrence) {
       base.recurrence = reminder.recurrence;
       // Invariant: recurring reminders never carry a completion stamp.
@@ -135,9 +141,10 @@ export class RemindersService {
       reminder.recurrence as Recurrence,
       after,
     );
+    // Acks are per-occurrence progress, so the new occurrence starts clean.
     await RemindersModel.update(
       { id: reminder.id },
-      { $SET: { date: next }, $REMOVE: ['sent_at'] },
+      { $SET: { date: next }, $REMOVE: ['sent_at', 'acked_by'] },
     );
   }
 
@@ -164,6 +171,53 @@ export class RemindersService {
       Logger.error((error as Error).message, error);
       throw error;
     }
+  }
+
+  /**
+   * Records the acting admin's ack (idempotent). Acks are a "who has acted"
+   * log orthogonal to completion — the caller's contact id comes from the
+   * JWT, so an admin can only ever ack as themselves.
+   */
+  async ackReminder(id: string, contactId: string) {
+    const stored = (await RemindersModel.get({ id }).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    })) as unknown as Reminder | undefined;
+    if (!stored) {
+      throw new NotFoundException('Reminder not found');
+    }
+    const acked = stored.acked_by ?? [];
+    if (!acked.includes(contactId)) {
+      await RemindersModel.update(
+        { id },
+        { acked_by: [...acked, contactId] },
+      ).catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+    }
+    return { id, message: 'Reminder acknowledged.' };
+  }
+
+  /** Withdraws the acting admin's ack (idempotent). */
+  async unackReminder(id: string, contactId: string) {
+    const stored = (await RemindersModel.get({ id }).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    })) as unknown as Reminder | undefined;
+    if (!stored) {
+      throw new NotFoundException('Reminder not found');
+    }
+    const remaining = (stored.acked_by ?? []).filter((c) => c !== contactId);
+    const change =
+      remaining.length > 0
+        ? { $SET: { acked_by: remaining } }
+        : { $REMOVE: ['acked_by'] };
+    await RemindersModel.update({ id }, change).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    });
+    return { id, message: 'Reminder acknowledgement removed.' };
   }
 
   /** Reopens a completed one-time reminder ($REMOVE is a no-op otherwise). */
