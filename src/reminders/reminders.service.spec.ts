@@ -116,6 +116,7 @@ describe('RemindersService', () => {
         'completed_at',
         'contact_id',
         'due_date',
+        'note',
         'recurrence',
       ]);
     });
@@ -125,7 +126,12 @@ describe('RemindersService', () => {
       Model.update.mockResolvedValue(dueReminder());
       await service.updateReminder(dueReminder({ id: 'rem-9' }));
       const [, update] = Model.update.mock.calls.at(-1)!;
-      expect(update.$REMOVE).toEqual(['contact_id', 'due_date', 'recurrence']);
+      expect(update.$REMOVE).toEqual([
+        'contact_id',
+        'due_date',
+        'note',
+        'recurrence',
+      ]);
     });
 
     it('treats a missing stored record as a date change (safe re-arm)', async () => {
@@ -156,6 +162,7 @@ describe('RemindersService', () => {
         'sent_at',
         'completed_at',
         'due_date',
+        'note',
         'recurrence',
       ]);
     });
@@ -173,6 +180,7 @@ describe('RemindersService', () => {
         'completed_at',
         'contact_id',
         'due_date',
+        'note',
         'recurrence',
       ]);
     });
@@ -240,7 +248,7 @@ describe('RemindersService', () => {
         }),
       );
       // Invariant: recurring reminders never carry a completion stamp.
-      expect(update.$REMOVE).toEqual(['completed_at']);
+      expect(update.$REMOVE).toEqual(['note', 'completed_at']);
     });
 
     it('never strips created_by when the payload omits it', async () => {
@@ -281,7 +289,7 @@ describe('RemindersService', () => {
       const result = await service.completeReminder('rem-1');
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'rem-1' },
-        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at', 'acked_by'] },
       );
       expect(result.message).toBe('Reminder occurrence completed.');
     });
@@ -294,7 +302,7 @@ describe('RemindersService', () => {
       await service.completeReminder('rem-1');
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'rem-1' },
-        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at', 'acked_by'] },
       );
     });
 
@@ -306,7 +314,7 @@ describe('RemindersService', () => {
       await service.completeReminder('rem-1');
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'rem-1' },
-        { $SET: { date: '2026-08-26' }, $REMOVE: ['sent_at'] },
+        { $SET: { date: '2026-08-26' }, $REMOVE: ['sent_at', 'acked_by'] },
       );
     });
 
@@ -335,6 +343,138 @@ describe('RemindersService', () => {
         { $REMOVE: ['completed_at'] },
       );
       expect(result.message).toBe('Reminder reopened.');
+    });
+  });
+
+  describe('ackReminder / unackReminder', () => {
+    it('appends the caller to acked_by', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', acked_by: ['a-1'] }),
+      );
+      Model.update.mockResolvedValue({});
+      const result = await service.ackReminder('rem-1', 'a-2');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { acked_by: ['a-1', 'a-2'] },
+      );
+      expect(result.message).toBe('Reminder acknowledged.');
+    });
+
+    it('starts the ack list on a reminder with none', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-1' }));
+      Model.update.mockResolvedValue({});
+      await service.ackReminder('rem-1', 'a-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { acked_by: ['a-1'] },
+      );
+    });
+
+    it('is idempotent when the caller already acked', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', acked_by: ['a-1'] }),
+      );
+      const result = await service.ackReminder('rem-1', 'a-1');
+      expect(Model.update).not.toHaveBeenCalled();
+      expect(result.message).toBe('Reminder acknowledged.');
+    });
+
+    it('404s an ack on an unknown reminder', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.ackReminder('nope', 'a-1')).rejects.toThrow(
+        'Reminder not found',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('propagates ack read failures', async () => {
+      Model.get.mockRejectedValue(new Error('ack read boom'));
+      await expect(service.ackReminder('rem-1', 'a-1')).rejects.toThrow(
+        'ack read boom',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('propagates unack read failures', async () => {
+      Model.get.mockRejectedValue(new Error('unack read boom'));
+      await expect(service.unackReminder('rem-1', 'a-1')).rejects.toThrow(
+        'unack read boom',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('propagates ack update failures', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-1' }));
+      Model.update.mockRejectedValue(new Error('ack boom'));
+      await expect(service.ackReminder('rem-1', 'a-1')).rejects.toThrow(
+        'ack boom',
+      );
+    });
+
+    it('removes only the caller from acked_by', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', acked_by: ['a-1', 'a-2'] }),
+      );
+      Model.update.mockResolvedValue({});
+      const result = await service.unackReminder('rem-1', 'a-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $SET: { acked_by: ['a-2'] } },
+      );
+      expect(result.message).toBe('Reminder acknowledgement removed.');
+    });
+
+    it('removes the attribute when the last ack is withdrawn', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', acked_by: ['a-1'] }),
+      );
+      Model.update.mockResolvedValue({});
+      await service.unackReminder('rem-1', 'a-1');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'rem-1' },
+        { $REMOVE: ['acked_by'] },
+      );
+    });
+
+    it('404s an unack on an unknown reminder', async () => {
+      Model.get.mockResolvedValue(undefined);
+      await expect(service.unackReminder('nope', 'a-1')).rejects.toThrow(
+        'Reminder not found',
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('propagates unack update failures', async () => {
+      Model.get.mockResolvedValue(
+        dueReminder({ id: 'rem-1', acked_by: ['a-1'] }),
+      );
+      Model.update.mockRejectedValue(new Error('unack boom'));
+      await expect(service.unackReminder('rem-1', 'a-1')).rejects.toThrow(
+        'unack boom',
+      );
+    });
+  });
+
+  describe('note field', () => {
+    it('passes the note through on create', async () => {
+      Model.__save.mockResolvedValue({});
+      await service.createReminder(dueReminder({ note: 'left voicemail' }));
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({ note: 'left voicemail' }),
+      );
+    });
+
+    it('sets the note on update and never touches acked_by', async () => {
+      Model.get.mockResolvedValue(dueReminder({ id: 'rem-9' })); // same date
+      Model.update.mockResolvedValue(dueReminder());
+      await service.updateReminder(
+        dueReminder({ id: 'rem-9', note: 'waiting on parent' }),
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.note).toBe('waiting on parent');
+      expect(update.$REMOVE).not.toContain('note');
+      expect(update.$SET.acked_by).toBeUndefined();
+      expect(update.$REMOVE).not.toContain('acked_by');
     });
   });
 
@@ -481,7 +621,7 @@ describe('RemindersService', () => {
       expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'rem-1' },
-        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at'] },
+        { $SET: { date: '2026-08-12' }, $REMOVE: ['sent_at', 'acked_by'] },
       );
       // Never stamped — the series continues.
       expect(Model.update).not.toHaveBeenCalledWith(

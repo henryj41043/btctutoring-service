@@ -20,4 +20,12 @@ export class Reminder {
   recurrence?: 'weekly' | 'monthly';
   /** ISO timestamp; one-time reminders only (recurring never carry it). */
   completed_at?: string;
+  /**
+   * Contact ids of admins who have acted on this reminder — a partial-progress
+   * log orthogonal to completed_at. Each admin toggles only their own ack;
+   * recurring reminders clear acks when they advance to the next occurrence.
+   */
+  acked_by?: string[];
+  /** Free-text note shown only on the Reminders page. */
+  note?: string;
 }

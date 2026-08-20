@@ -82,6 +82,39 @@ export class RemindersController {
     }
   }
 
+  @Post(':id/ack')
+  @UseGuards(AuthGuard('jwt'))
+  async ackReminder(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+  ): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      // The ack is pinned to the caller's own contact id from the JWT.
+      return this.remindersService.ackReminder(id, user.contact);
+    } else {
+      Logger.error('User not authorized to ack reminders');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
+  @Post(':id/unack')
+  @UseGuards(AuthGuard('jwt'))
+  async unackReminder(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+  ): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.remindersService.unackReminder(id, user.contact);
+    } else {
+      Logger.error('User not authorized to unack reminders');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Post(':id/uncomplete')
   @UseGuards(AuthGuard('jwt'))
   async uncompleteReminder(

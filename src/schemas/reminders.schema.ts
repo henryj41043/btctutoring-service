@@ -28,4 +28,12 @@ export const RemindersSchema = new dynamoose.Schema({
   },
   // ISO completion stamp — one-time reminders only.
   completed_at: String,
+  // Contact ids of admins who have acted on this reminder (partial-progress
+  // log, orthogonal to completed_at). Recurring advance clears it.
+  acked_by: {
+    type: Array,
+    schema: [String],
+  },
+  // Free-text note shown only on the Reminders page (never the contact page).
+  note: String,
 });

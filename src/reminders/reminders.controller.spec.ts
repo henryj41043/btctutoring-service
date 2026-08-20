@@ -41,6 +41,8 @@ describe('RemindersController', () => {
       deleteReminder: jest.fn(),
       completeReminder: jest.fn(),
       uncompleteReminder: jest.fn(),
+      ackReminder: jest.fn(),
+      unackReminder: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RemindersController],
@@ -79,6 +81,24 @@ describe('RemindersController', () => {
     expect(service.completeReminder).toHaveBeenCalledWith('rem-1');
     await controller.uncompleteReminder(reqAs(admin), 'rem-1');
     expect(service.uncompleteReminder).toHaveBeenCalledWith('rem-1');
+  });
+
+  it('admin acks and unacks as their own contact id from the JWT', async () => {
+    await controller.ackReminder(reqAs(admin), 'rem-1');
+    expect(service.ackReminder).toHaveBeenCalledWith('rem-1', 'c-admin');
+    await controller.unackReminder(reqAs(admin), 'rem-1');
+    expect(service.unackReminder).toHaveBeenCalledWith('rem-1', 'c-admin');
+  });
+
+  it('non-admin cannot ack or unack', async () => {
+    await expect(controller.ackReminder(reqAs(tutor), 'rem-1')).rejects.toThrow(
+      'Unauthorized',
+    );
+    await expect(
+      controller.unackReminder(reqAs(tutor), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    expect(service.ackReminder).not.toHaveBeenCalled();
+    expect(service.unackReminder).not.toHaveBeenCalled();
   });
 
   it('non-admin cannot complete or reopen', async () => {
@@ -123,6 +143,12 @@ describe('RemindersController', () => {
     ).rejects.toThrow('Unauthorized');
     await expect(
       controller.deleteReminder(reqAs(groupless), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.ackReminder(reqAs(groupless), 'rem-1'),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      controller.unackReminder(reqAs(groupless), 'rem-1'),
     ).rejects.toThrow('Unauthorized');
   });
 });
