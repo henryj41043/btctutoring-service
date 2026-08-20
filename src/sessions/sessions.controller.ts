@@ -17,7 +17,7 @@ import { TeamsService } from '../teams/teams.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
-import { Session } from '../models/session.model';
+import { Session, SessionType } from '../models/session.model';
 import { isLeadTutor, isTutorLike } from '../models/user-groups';
 
 @Controller('sessions')
@@ -96,13 +96,24 @@ export class SessionsController {
     @Body() session: Session,
   ) {
     const user: User = req.user as User;
-    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
     if (isAdmin) {
       return this.sessionsService.createSession(session);
-    } else {
-      Logger.error('Creating new session is restricted to admins');
-      throw new ForbiddenException('Unauthorized');
     }
+    // Tutors schedule their OWN make-ups (client policy 2026-08): a non-admin
+    // may create a session only when it's a MAKE_UP assigned to themselves.
+    // Unlike updates there's no stored record to cross-check — the payload
+    // constraint IS the whole authz surface, so both fields are pinned.
+    const isOwnMakeup: boolean =
+      session.type === SessionType.MAKE_UP &&
+      !!session.tutor_id &&
+      session.tutor_id === user.contact;
+    if (isTutorLike(groups) && isOwnMakeup) {
+      return this.sessionsService.createSession(session);
+    }
+    Logger.error('Creating new session is restricted to admins');
+    throw new ForbiddenException('Unauthorized');
   }
 
   @Post('batch')

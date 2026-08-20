@@ -337,9 +337,53 @@ describe('SessionsController', () => {
       expect(service.createSession).toHaveBeenCalled();
     });
 
-    it('non-admin cannot create a session', async () => {
+    it('non-admin cannot create a regular (non-make-up) session', async () => {
       await expect(
         controller.createSession(reqAs(tutor), session()),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('tutor creates their OWN make-up session', async () => {
+      await controller.createSession(
+        reqAs(tutor),
+        session({ type: SessionType.MAKE_UP, tutor_id: 'c-tutor' }),
+      );
+      expect(service.createSession).toHaveBeenCalled();
+    });
+
+    it('lead creates their OWN make-up session (tutor-like)', async () => {
+      await controller.createSession(
+        reqAs(lead),
+        session({ type: SessionType.MAKE_UP, tutor_id: 'c-lead' }),
+      );
+      expect(service.createSession).toHaveBeenCalled();
+    });
+
+    it('tutor cannot create a make-up assigned to someone else', async () => {
+      await expect(
+        controller.createSession(
+          reqAs(tutor),
+          session({ type: SessionType.MAKE_UP, tutor_id: 'c-other' }),
+        ),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.createSession).not.toHaveBeenCalled();
+    });
+
+    it('tutor cannot create a make-up with no tutor on it', async () => {
+      await expect(
+        controller.createSession(
+          reqAs(tutor),
+          session({ type: SessionType.MAKE_UP, tutor_id: undefined }),
+        ),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('groupless user cannot create even a self-assigned make-up', async () => {
+      await expect(
+        controller.createSession(
+          reqAs(stranger),
+          session({ type: SessionType.MAKE_UP, tutor_id: 'c-stranger' }),
+        ),
       ).rejects.toThrow('Unauthorized');
     });
 
