@@ -433,6 +433,15 @@ describe('StudentsService', () => {
       );
     });
 
+    it('persists the BTC & Me enrollment flag', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(sampleStudent({ btc_and_me: true }));
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        expect.objectContaining({ btc_and_me: true }),
+      );
+    });
+
     it('persists the onboarding_complete flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ onboarding_complete: true }));

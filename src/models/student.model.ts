@@ -23,6 +23,8 @@ export class Student {
   assigned_tutor_id: string;
   package: string;
   scholarship?: boolean;
+  /** Enrolled in the "BTC & Me" group program — bills a flat monthly fee. */
+  btc_and_me?: boolean;
   schedule?: ScheduleSlot[];
   package_start_date?: string;
   auto_renew?: boolean;

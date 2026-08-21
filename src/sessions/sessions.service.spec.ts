@@ -220,6 +220,18 @@ describe('SessionsService', () => {
         'save boom',
       );
     });
+
+    it('persists a GROUP session roster through create', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      const participants = [
+        { id: 's-a', name: 'Ava' },
+        { id: 's-b', name: 'Ben' },
+      ];
+      await service.createSession(sampleSession({ participants }));
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({ participants }),
+      );
+    });
   });
 
   describe('createSessions (batch)', () => {
@@ -241,6 +253,14 @@ describe('SessionsService', () => {
       expect((result as { ids: string[] }).ids).toHaveLength(26);
     });
 
+    it('persists rosters through the batch path', async () => {
+      Model.batchPut.mockResolvedValue(undefined);
+      const participants = [{ id: 's-a', name: 'Ava' }];
+      await service.createSessions([sampleSession({ participants })]);
+      const batch = Model.batchPut.mock.calls[0][0];
+      expect(batch[0].participants).toEqual(participants);
+    });
+
     it('rejects when a batch write fails', async () => {
       Model.batchPut.mockRejectedValue(new Error('batch boom'));
       await expect(service.createSessions([sampleSession()])).rejects.toThrow(
@@ -259,6 +279,16 @@ describe('SessionsService', () => {
         expect.objectContaining({ status: 'Pending' }),
       );
       expect(result).toBe(updated);
+    });
+
+    it('persists a roster change through update', async () => {
+      const participants = [{ id: 's-c', name: 'Cy' }];
+      Model.update.mockResolvedValue(sampleSession());
+      await service.updateSession(sampleSession({ participants }));
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'session-1' },
+        expect.objectContaining({ participants }),
+      );
     });
 
     it('rejects when update fails', async () => {

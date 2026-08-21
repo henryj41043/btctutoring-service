@@ -274,6 +274,7 @@ export class SessionsService {
       tutor_id: session.tutor_id,
       tutor_name: session.tutor_name,
       series_id: session.series_id,
+      participants: session.participants,
     });
     return newSession
       .save()
@@ -302,6 +303,7 @@ export class SessionsService {
       tutor_id: session.tutor_id,
       tutor_name: session.tutor_name,
       series_id: session.series_id,
+      participants: session.participants,
     }));
 
     // DynamoDB batchPut accepts at most 25 items per request.
@@ -340,6 +342,7 @@ export class SessionsService {
         tutor_id: session.tutor_id,
         tutor_name: session.tutor_name,
         series_id: session.series_id,
+        participants: session.participants,
       },
     )
       .then((updatedSession) => {

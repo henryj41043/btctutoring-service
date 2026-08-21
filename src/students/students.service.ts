@@ -37,6 +37,7 @@ export class StudentsService {
       assigned_tutor_id: student.assigned_tutor_id,
       package: student.package,
       scholarship: student.scholarship,
+      btc_and_me: student.btc_and_me,
       schedule: schedule && schedule.length > 0 ? schedule : undefined,
       package_start_date: student.package_start_date,
       auto_renew: student.auto_renew,
