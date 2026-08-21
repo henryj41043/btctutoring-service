@@ -1,4 +1,6 @@
 import {
+  GROUP_MONTHLY_FEE,
+  groupSessionFee,
   midMonthAdjustment,
   monthKey,
   siblingDiscountedTotal,
@@ -159,5 +161,22 @@ describe('siblingDiscountedTotal', () => {
 
   it('rounds to the nearest penny', () => {
     expect(siblingDiscountedTotal(100, 33, 3)).toBe(67);
+  });
+});
+
+describe('groupSessionFee', () => {
+  it('charges the flat fee per enrolled student', () => {
+    const students = [
+      { btc_and_me: true },
+      { btc_and_me: true },
+      { btc_and_me: false },
+      {},
+    ] as never[];
+    expect(groupSessionFee(students)).toBe(2 * GROUP_MONTHLY_FEE);
+  });
+
+  it('is zero for a family with no enrollees', () => {
+    expect(groupSessionFee([])).toBe(0);
+    expect(groupSessionFee([{ btc_and_me: false }] as never[])).toBe(0);
   });
 });

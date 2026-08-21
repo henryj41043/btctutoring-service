@@ -155,6 +155,17 @@ describe('NotificationsService', () => {
     expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
   });
 
+  it('includes stale pending GROUP sessions in the digest', async () => {
+    sessionsService.getAllSessions.mockResolvedValue([
+      stale({ type: SessionType.GROUP, student_name: 'Ava, Ben' }),
+    ] as never);
+    contactsService.getContact.mockResolvedValue([
+      { id: 'tutor-1', first_name: 'Tess', email: 'tess@example.com' },
+    ] as never);
+    await service.sendPendingSessionReminders();
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
+  });
+
   it('sends nothing when there are no stale pending sessions', async () => {
     // Contact resolvable — a wrongly-included session would actually send.
     contactsService.getContact.mockResolvedValue([

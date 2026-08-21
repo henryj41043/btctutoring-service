@@ -14,6 +14,8 @@ export const StudentsSchema = new dynamoose.Schema({
   assigned_tutor_id: String,
   package: String,
   scholarship: Boolean,
+  // Enrolled in the "BTC & Me" group program (flat monthly fee billing).
+  btc_and_me: Boolean,
   schedule: {
     type: Array,
     schema: [

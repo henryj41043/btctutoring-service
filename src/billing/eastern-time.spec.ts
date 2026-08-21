@@ -1,4 +1,8 @@
-import { easternSlotToUtc, easternWallTimeToUtc } from './eastern-time';
+import {
+  easternSlotToUtc,
+  easternWallTimeToUtc,
+  utcToEasternWall,
+} from './eastern-time';
 
 describe('easternWallTimeToUtc', () => {
   it('converts an EDT (summer) wall time at UTC-4', () => {
@@ -49,6 +53,37 @@ describe('easternWallTimeToUtc', () => {
     expect(easternWallTimeToUtc(2026, 6, 20, 18, 0).getTime()).toBe(
       Date.UTC(2026, 6, 20, 22, 0),
     );
+  });
+});
+
+describe('utcToEasternWall', () => {
+  it('reads the Eastern weekday and slot time of a summer instant (EDT)', () => {
+    // Wed Jul 29 2026 21:00Z = 5:00 PM EDT.
+    expect(utcToEasternWall(new Date('2026-07-29T21:00:00.000Z'))).toEqual({
+      weekday: 'WEDNESDAY',
+      time: '17:00',
+    });
+  });
+
+  it('reads the Eastern weekday and slot time of a winter instant (EST)', () => {
+    // Mon Jan 5 2026 15:30Z = 10:30 AM EST.
+    expect(utcToEasternWall(new Date('2026-01-05T15:30:00.000Z'))).toEqual({
+      weekday: 'MONDAY',
+      time: '10:30',
+    });
+  });
+
+  it('crosses the date line: a late-night UTC instant is the prior Eastern day', () => {
+    // Thu Jul 30 2026 02:00Z = Wed Jul 29 10:00 PM EDT.
+    expect(utcToEasternWall(new Date('2026-07-30T02:00:00.000Z'))).toEqual({
+      weekday: 'WEDNESDAY',
+      time: '22:00',
+    });
+  });
+
+  it('round-trips with easternSlotToUtc, including midnight', () => {
+    const wall = utcToEasternWall(easternSlotToUtc(2026, 6, 8, '00:00'));
+    expect(wall).toEqual({ weekday: 'WEDNESDAY', time: '00:00' });
   });
 });
 
