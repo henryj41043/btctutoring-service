@@ -4,7 +4,7 @@ import { Contact } from '../models/contact.model';
 
 describe('AutoRenewService', () => {
   let service: AutoRenewService;
-  const students = { getStudents: jest.fn() };
+  const students = { getStudents: jest.fn(), promotePendingPackage: jest.fn() };
   const sessions = { createSessions: jest.fn(), getAllSessions: jest.fn() };
   const contacts = { getContacts: jest.fn() };
   const billing = {
@@ -54,6 +54,7 @@ describe('AutoRenewService', () => {
     });
     sessions.createSessions.mockResolvedValue({});
     sessions.getAllSessions.mockResolvedValue([]);
+    students.promotePendingPackage.mockResolvedValue(undefined);
     students.getStudents.mockResolvedValue([student()]);
     contacts.getContacts.mockResolvedValue([parent(), tutor()]);
   });
@@ -221,6 +222,139 @@ describe('AutoRenewService', () => {
   it('the @Cron handler runs the renewal for the current month', async () => {
     await service.handleMonthlyRenewal();
     expect(billing.acquireLock).toHaveBeenCalled();
+  });
+
+  describe('scheduled package changes', () => {
+    // Run month: September 2026 (the cron fires on the 1st).
+    const september = new Date(2026, 8, 1);
+    const pendingStudent = (over: Partial<Student> = {}): Student =>
+      student({
+        // Old Succeed schedule: Wednesdays only → 5 September sessions.
+        schedule: [
+          { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:30' },
+        ],
+        pending_package: 'Achieve', // $546/mo
+        pending_package_effective: '2026-09-01',
+        // New schedule: Mondays only → 4 September sessions.
+        pending_schedule: [
+          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+        ],
+        ...over,
+      });
+
+    it('promotes on the effective 1st: persists, generates from the NEW schedule, bills the new package', async () => {
+      students.getStudents.mockResolvedValue([pendingStudent()]);
+      const result = await service.runAutoRenew(september);
+      // Persisted with the pending fields still intact on the passed record.
+      expect(students.promotePendingPackage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 's-1', pending_package: 'Achieve' }),
+      );
+      // Generated exactly once, from the pending (Monday) schedule.
+      expect(sessions.createSessions).toHaveBeenCalledTimes(1);
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(4); // Sept 2026 Mondays: 7, 14, 21, 28
+      expect(created[0].start_datetime).toBe('2026-09-07T14:00:00.000Z'); // 10am EDT
+      expect(result.sessionsCreated).toBe(4);
+      // Billed at the new package's price.
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ period_start: '2026-09-01', amount: 546 }),
+      );
+    });
+
+    it('promotes and bills even with auto-renew off (no sessions generated)', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({ auto_renew: false }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingPackage).toHaveBeenCalled();
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 546 }),
+      );
+    });
+
+    it('keeps the old schedule when no pending schedule was defined', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({ pending_schedule: undefined }),
+      ]);
+      await service.runAutoRenew(september);
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(5); // Sept 2026 Wednesdays: 2, 9, 16, 23, 30
+    });
+
+    it('leaves a future-month pending change untouched', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({ pending_package_effective: '2026-10-01' }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingPackage).not.toHaveBeenCalled();
+      // Old package billed; old schedule renews normally.
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 362 }),
+      );
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(5); // Wednesdays — old schedule
+    });
+
+    it('catches up a past-dated effective (cron was down) without double-generating', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({ pending_package_effective: '2026-08-01' }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingPackage).toHaveBeenCalled();
+      // Past start date → the normal renewable path generates; exactly once.
+      expect(sessions.createSessions).toHaveBeenCalledTimes(1);
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(4); // Mondays — the promoted schedule
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 546 }),
+      );
+    });
+
+    it('never generates for a non-promoted student whose schedule started on the 1st', async () => {
+      // Regression guard on the promoted-generation union: same ==monthStart
+      // start date, but no pending change → excluded as before (their month
+      // was generated client-side at schedule creation).
+      students.getStudents.mockResolvedValue([
+        student({ package_start_date: '2026-09-01T00:00:00' }),
+      ]);
+      const result = await service.runAutoRenew(september);
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+      expect(result.sessionsCreated).toBe(0);
+    });
+
+    it('one failed promotion never blocks the rest of the run', async () => {
+      students.promotePendingPackage
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValue(undefined);
+      students.getStudents.mockResolvedValue([
+        pendingStudent({ id: 's-1', contact_id: 'c-1' }),
+        pendingStudent({ id: 's-2', contact_id: 'c-1' }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingPackage).toHaveBeenCalledTimes(2);
+      // BOTH bill at the new package: the month-aware charge resolves the
+      // pending fields even when the promotion write failed (derive-on-read),
+      // and next month's cron catches the stranded promotion up.
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 1092 }), // 546 × 2
+      );
+    });
+
+    it('an unresolvable CUSTOM pending bills zero (visible, recoverable)', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({
+          auto_renew: false,
+          pending_package: 'Custom',
+          pending_schedule: undefined,
+          // no pending_custom_* overrides -> def resolves null
+        }),
+      ]);
+      const result = await service.runAutoRenew(september);
+      expect(students.promotePendingPackage).toHaveBeenCalled();
+      expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
+      expect(result.billingRecords).toBe(0);
+    });
   });
 
   describe('BTC & Me billing fee', () => {

@@ -424,6 +424,68 @@ describe('StudentsService', () => {
       expect(update.$SET).not.toHaveProperty('schedule');
     });
 
+    it('persists the scheduled-package-change fields', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+          pending_custom_monthly_cost: 500,
+          pending_schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        }),
+      );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        expect.objectContaining({
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+          pending_custom_monthly_cost: 500,
+          pending_schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        }),
+      );
+    });
+
+    it('drops an empty pending_schedule from the write', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({ pending_package: 'Achieve', pending_schedule: [] }),
+      );
+      const upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd).not.toHaveProperty('pending_schedule');
+    });
+
+    it('clears every pending field on the empty-string signal, with no $SET overlap', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          pending_package: '',
+          pending_package_effective: '2026-09-01',
+          pending_custom_monthly_cost: 500,
+        }),
+      );
+      const update = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(update.$REMOVE).toEqual([
+        'pending_package',
+        'pending_custom_monthly_cost',
+        'pending_custom_sessions_per_week',
+        'pending_custom_session_length_min',
+        'pending_package_effective',
+        'pending_schedule',
+      ]);
+      // DynamoDB rejects overlapping SET/REMOVE paths — none may remain.
+      for (const field of update.$REMOVE) {
+        expect(update.$SET).not.toHaveProperty(field);
+      }
+      expect(update.$SET.name).toBe('Pat'); // the rest of the save still lands
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
@@ -517,6 +579,103 @@ describe('StudentsService', () => {
       await expect(service.updateStudent(sampleStudent())).rejects.toThrow(
         'update boom',
       );
+    });
+  });
+
+  describe('promotePendingPackage', () => {
+    const pendingStudent = (overrides: Partial<Student> = {}): Student =>
+      sampleStudent({
+        package: 'Succeed',
+        custom_monthly_cost: 111,
+        custom_sessions_per_week: 1,
+        custom_session_length_min: 30,
+        pending_package: 'Achieve',
+        pending_package_effective: '2026-09-01',
+        pending_schedule: [
+          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+        ],
+        ...overrides,
+      });
+
+    it('promotes a non-CUSTOM pending: package, wall-stamped start, schedule; removes pending + stale customs', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingPackage(pendingStudent());
+      const [key, update] = Model.update.mock.calls.at(-1)!;
+      expect(key).toEqual({ id: 'student-1' });
+      expect(update.$SET).toEqual({
+        package: 'Achieve',
+        // Zoneless local-wall stamp — never a bare 'YYYY-MM-DD'.
+        package_start_date: '2026-09-01T00:00:00',
+        schedule: [
+          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+        ],
+      });
+      expect(update.$REMOVE).toEqual([
+        'pending_package',
+        'pending_custom_monthly_cost',
+        'pending_custom_sessions_per_week',
+        'pending_custom_session_length_min',
+        'pending_package_effective',
+        'pending_schedule',
+        'custom_monthly_cost',
+        'custom_sessions_per_week',
+        'custom_session_length_min',
+      ]);
+    });
+
+    it('promotes a CUSTOM pending with its overrides, keeping custom fields set', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingPackage(
+        pendingStudent({
+          pending_package: 'Custom',
+          pending_custom_monthly_cost: 500,
+          pending_custom_sessions_per_week: 2,
+          pending_custom_session_length_min: 45,
+        }),
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET).toEqual(
+        expect.objectContaining({
+          package: 'Custom',
+          custom_monthly_cost: 500,
+          custom_sessions_per_week: 2,
+          custom_session_length_min: 45,
+        }),
+      );
+      expect(update.$REMOVE).not.toContain('custom_monthly_cost');
+    });
+
+    it('keeps the old schedule when no pending schedule was defined', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingPackage(
+        pendingStudent({ pending_schedule: undefined }),
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET).not.toHaveProperty('schedule');
+      expect(update.$REMOVE).toContain('pending_schedule');
+    });
+
+    it('drops undefined CUSTOM overrides rather than writing them', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingPackage(
+        pendingStudent({
+          pending_package: 'Custom',
+          pending_custom_monthly_cost: 500,
+          pending_custom_sessions_per_week: undefined,
+          pending_custom_session_length_min: undefined,
+        }),
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET).toHaveProperty('custom_monthly_cost', 500);
+      expect(update.$SET).not.toHaveProperty('custom_sessions_per_week');
+      expect(update.$SET).not.toHaveProperty('custom_session_length_min');
+    });
+
+    it('propagates a failed promotion write', async () => {
+      Model.update.mockRejectedValue(new Error('promote boom'));
+      await expect(
+        service.promotePendingPackage(pendingStudent()),
+      ).rejects.toThrow('promote boom');
     });
   });
 

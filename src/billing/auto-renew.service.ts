@@ -9,6 +9,7 @@ import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
 import { resolvePackageDef, round2 } from './package-config';
+import { Package } from './package.enum';
 import { semiMonthlySplit } from './proration';
 import {
   studentMonthlyCharge,
@@ -89,6 +90,59 @@ export class AutoRenewService {
     const activeStudents = students.filter((s) => s.status === ACTIVE_STUDENT);
     const monthStart = new Date(year, month, 1);
 
+    // Scheduled package changes: promote every due pending change BEFORE the
+    // renewable filter and the billing loop, so both read the new package.
+    // A past-dated effective (cron was down) promotes now too — its past
+    // start date then flows through the normal renewable path.
+    const monthStartKey = `${this.monthKey(year, month)}-01`;
+    const promotedOnTime: Student[] = [];
+    const promotedContactIds = new Set<string>();
+    for (const student of activeStudents) {
+      if (!student.pending_package || !student.pending_package_effective) {
+        continue;
+      }
+      if (student.pending_package_effective > monthStartKey) continue;
+      try {
+        // Snapshot: the persisted write must see the pending fields exactly
+        // as loaded, independent of the in-memory mutation below.
+        await this.students.promotePendingPackage({ ...student });
+      } catch (err) {
+        this.logger.error(
+          `Pending-package promotion failed for ${student.id}`,
+          err,
+        );
+        continue;
+      }
+      // Mirror the persisted promotion in-memory for the loops below.
+      const onTime = student.pending_package_effective === monthStartKey;
+      student.package = student.pending_package;
+      student.package_start_date = `${student.pending_package_effective}T00:00:00`;
+      if (student.package === (Package.CUSTOM as string)) {
+        student.custom_monthly_cost = student.pending_custom_monthly_cost;
+        student.custom_sessions_per_week =
+          student.pending_custom_sessions_per_week;
+        student.custom_session_length_min =
+          student.pending_custom_session_length_min;
+      } else {
+        delete student.custom_monthly_cost;
+        delete student.custom_sessions_per_week;
+        delete student.custom_session_length_min;
+      }
+      if (student.pending_schedule && student.pending_schedule.length > 0) {
+        student.schedule = student.pending_schedule;
+      }
+      delete student.pending_package;
+      delete student.pending_custom_monthly_cost;
+      delete student.pending_custom_sessions_per_week;
+      delete student.pending_custom_session_length_min;
+      delete student.pending_package_effective;
+      delete student.pending_schedule;
+      promotedContactIds.add(student.contact_id);
+      if (onTime) {
+        promotedOnTime.push(student);
+      }
+    }
+
     // Session roll-forward: auto-renew students whose package started in a prior
     // month (the start month's sessions were created when the schedule was set).
     const renewable = activeStudents.filter(
@@ -115,14 +169,34 @@ export class AutoRenewService {
       }
     }
 
+    // Just-promoted on-time students: their start date EQUALS monthStart, so
+    // the renewable '<' check excludes them — generate their first month on
+    // the new schedule here (auto_renew still gates generation).
+    for (const student of promotedOnTime) {
+      if (!student.auto_renew || !student.schedule?.length) continue;
+      const tutor = contacts.find((c) => c.id === student.assigned_tutor_id);
+      const monthSessions = this.buildMonthSessions(
+        student,
+        tutor,
+        year,
+        month,
+      );
+      if (monthSessions.length > 0) {
+        await this.sessions.createSessions(monthSessions);
+        sessionsCreated += monthSessions.length;
+      }
+    }
+
     // BTC & Me: extend every still-running group series into this month.
     sessionsCreated += await this.rollGroupSeries(year, month);
 
-    // Billing roll-forward: one record set per contact with a renewable student
-    // or a BTC & Me enrollee (group-only families still owe the flat fee).
+    // Billing roll-forward: one record set per contact with a renewable
+    // student, a BTC & Me enrollee (group-only families still owe the flat
+    // fee), or a just-promoted package change (owed even with auto-renew off).
     const billableContactIds = new Set([
       ...renewable.map((s) => s.contact_id),
       ...activeStudents.filter((s) => s.btc_and_me).map((s) => s.contact_id),
+      ...promotedContactIds,
     ]);
     let billingRecords = 0;
     for (const contactId of billableContactIds) {
