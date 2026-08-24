@@ -40,6 +40,18 @@ export class Student {
   extra_planning_minutes?: number;
   /** Old package's prorated portion for a mid-month package change month. */
   mid_month_prior_charge?: number;
+  /**
+   * Scheduled package change, applied by the 1st-of-month cron on its
+   * effective date ('' from the client = clear the pending change).
+   */
+  pending_package?: string;
+  pending_custom_monthly_cost?: number;
+  pending_custom_sessions_per_week?: number;
+  pending_custom_session_length_min?: number;
+  /** 'YYYY-MM-DD', always the 1st of a month. */
+  pending_package_effective?: string;
+  /** The new package's weekly slots, swapped in at promotion. */
+  pending_schedule?: ScheduleSlot[];
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
   mid_month_change_period?: string;
   /** @deprecated Replaced by package-driven scheduling; retained for old records. */

@@ -51,21 +51,62 @@ function baseMonthlyCharge(
   return def.monthlyCost;
 }
 
+/** The package-defining fields (current or pending) for one billing month. */
+export interface PackageFields {
+  package?: string;
+  custom_monthly_cost?: number;
+  custom_sessions_per_week?: number;
+  custom_session_length_min?: number;
+}
+
+/**
+ * The package fields that govern a given month: the scheduled (pending)
+ * change once the viewed month reaches its effective month, else the current
+ * package. Lets a future month's billing resolve the new package BEFORE the
+ * 1st-of-month cron promotes it. Mirror of the frontend helper.
+ */
+export function packageFieldsForMonth(
+  student: Student,
+  year: number,
+  month: number,
+): PackageFields {
+  if (
+    student.pending_package &&
+    student.pending_package_effective &&
+    student.pending_package_effective.slice(0, 7) <= monthKey(year, month)
+  ) {
+    return {
+      package: student.pending_package,
+      custom_monthly_cost: student.pending_custom_monthly_cost,
+      custom_sessions_per_week: student.pending_custom_sessions_per_week,
+      custom_session_length_min: student.pending_custom_session_length_min,
+    };
+  }
+  return {
+    package: student.package,
+    custom_monthly_cost: student.custom_monthly_cost,
+    custom_sessions_per_week: student.custom_sessions_per_week,
+    custom_session_length_min: student.custom_session_length_min,
+  };
+}
+
 /**
  * Server-side mirror of the frontend billing-amount helper
  * (btctutoring-app/src/app/utils/billing-amount.ts). The amount to charge a
  * student for a given billing month (`month` is 0-indexed). Includes the
- * mid-month package-change adjustment (old package's portion for that month).
+ * mid-month package-change adjustment (old package's portion for that month)
+ * and resolves any scheduled package change effective by that month.
  */
 export function studentMonthlyCharge(
   student: Student,
   year: number,
   month: number,
 ): number {
-  const def = resolvePackageDef(student.package, {
-    monthlyCost: student.custom_monthly_cost,
-    sessionsPerWeek: student.custom_sessions_per_week,
-    sessionLengthMin: student.custom_session_length_min,
+  const fields = packageFieldsForMonth(student, year, month);
+  const def = resolvePackageDef(fields.package, {
+    monthlyCost: fields.custom_monthly_cost,
+    sessionsPerWeek: fields.custom_sessions_per_week,
+    sessionLengthMin: fields.custom_session_length_min,
   });
   if (!def) return 0;
 

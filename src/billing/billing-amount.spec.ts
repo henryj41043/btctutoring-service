@@ -3,6 +3,7 @@ import {
   groupSessionFee,
   midMonthAdjustment,
   monthKey,
+  packageFieldsForMonth,
   siblingDiscountedTotal,
   studentMonthlyCharge,
 } from './billing-amount';
@@ -178,5 +179,100 @@ describe('groupSessionFee', () => {
   it('is zero for a family with no enrollees', () => {
     expect(groupSessionFee([])).toBe(0);
     expect(groupSessionFee([{ btc_and_me: false }] as never[])).toBe(0);
+  });
+});
+
+describe('packageFieldsForMonth', () => {
+  const pendingStudent = (over: Record<string, unknown> = {}) =>
+    ({
+      package: 'Succeed',
+      custom_monthly_cost: undefined,
+      pending_package: 'Achieve',
+      pending_package_effective: '2026-09-01',
+      ...over,
+    }) as never;
+
+  it('returns the current fields before the effective month', () => {
+    expect(packageFieldsForMonth(pendingStudent(), 2026, 7).package).toBe(
+      'Succeed',
+    );
+  });
+
+  it('returns the pending fields in the effective month', () => {
+    expect(packageFieldsForMonth(pendingStudent(), 2026, 8).package).toBe(
+      'Achieve',
+    );
+  });
+
+  it('returns the pending fields after the effective month (past-dated)', () => {
+    expect(packageFieldsForMonth(pendingStudent(), 2027, 0).package).toBe(
+      'Achieve',
+    );
+  });
+
+  it('carries the pending CUSTOM overrides', () => {
+    const fields = packageFieldsForMonth(
+      pendingStudent({
+        pending_package: 'Custom',
+        pending_custom_monthly_cost: 500,
+        pending_custom_sessions_per_week: 2,
+        pending_custom_session_length_min: 45,
+      }),
+      2026,
+      8,
+    );
+    expect(fields).toEqual({
+      package: 'Custom',
+      custom_monthly_cost: 500,
+      custom_sessions_per_week: 2,
+      custom_session_length_min: 45,
+    });
+  });
+
+  it('ignores a pending package with no effective date', () => {
+    expect(
+      packageFieldsForMonth(
+        pendingStudent({ pending_package_effective: undefined }),
+        2026,
+        8,
+      ).package,
+    ).toBe('Succeed');
+  });
+
+  it('is current-only for students with no pending change', () => {
+    expect(
+      packageFieldsForMonth(
+        { package: 'Succeed', custom_monthly_cost: 1 } as never,
+        2026,
+        8,
+      ),
+    ).toEqual({
+      package: 'Succeed',
+      custom_monthly_cost: 1,
+      custom_sessions_per_week: undefined,
+      custom_session_length_min: undefined,
+    });
+  });
+});
+
+describe('studentMonthlyCharge with a scheduled package change', () => {
+  const student = (over: Record<string, unknown> = {}) =>
+    ({
+      package: 'Succeed',
+      package_start_date: '2026-01-01T00:00:00',
+      pending_package: 'Achieve',
+      pending_package_effective: '2026-09-01',
+      ...over,
+    }) as never;
+
+  it('charges the old package before and the new from the effective month', () => {
+    expect(studentMonthlyCharge(student(), 2026, 7)).toBe(362); // August
+    expect(studentMonthlyCharge(student(), 2026, 8)).toBe(546); // September
+  });
+
+  it('handles a year-boundary effective date', () => {
+    const s = student({ pending_package_effective: '2027-01-01' });
+    expect(studentMonthlyCharge(s, 2026, 11)).toBe(362); // December
+    expect(studentMonthlyCharge(s, 2027, 0)).toBe(546); // January
   });
 });

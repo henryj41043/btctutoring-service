@@ -57,6 +57,29 @@ export const StudentsSchema = new dynamoose.Schema({
   // month, applied on top of the new package's charge only in that month.
   mid_month_prior_charge: Number,
   mid_month_change_period: String,
+  // Scheduled package change: applied by the 1st-of-month cron once the
+  // effective date arrives; billing resolves the pending package for any
+  // month >= the effective month even before promotion.
+  pending_package: String,
+  pending_custom_monthly_cost: Number,
+  pending_custom_sessions_per_week: Number,
+  pending_custom_session_length_min: Number,
+  // 'YYYY-MM-DD', always the 1st of a month.
+  pending_package_effective: String,
+  // The new package's weekly slots, swapped in at promotion.
+  pending_schedule: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          weekday: String,
+          start_time: String,
+          end_time: String,
+        },
+      },
+    ],
+  },
   // Deprecated: replaced by package-driven scheduling. Kept so reads of
   // pre-existing records don't error.
   available_minutes: Number,
