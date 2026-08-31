@@ -2,6 +2,8 @@ export class ScheduleSlot {
   weekday: string;
   start_time: string; // 'HH:mm'
   end_time: string; // 'HH:mm'
+  /** Optional per-slot tutor override; absent = the student's assigned (primary) tutor. */
+  tutor_id?: string;
 }
 
 /** A dated lot of remaining make-up minutes; expires 90 days after earned_date. */

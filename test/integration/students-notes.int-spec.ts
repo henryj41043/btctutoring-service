@@ -45,14 +45,32 @@ describe('Students & Notes (integration, admin-only)', () => {
       expect(StudentModel.scan).toHaveBeenCalledWith();
     });
 
-    it('admin filters students by tutor', async () => {
-      scanResolves(StudentModel, []);
-      await request(server())
+    it('admin filters students by tutor (widened: assigned OR slot tutor)', async () => {
+      scanResolves(StudentModel, [
+        { id: 's-assigned', assigned_tutor_id: 'tutor@example.com' },
+        {
+          id: 's-slot',
+          assigned_tutor_id: 'other',
+          schedule: [
+            {
+              weekday: 'MONDAY',
+              start_time: '10:00',
+              end_time: '10:30',
+              tutor_id: 'tutor@example.com',
+            },
+          ],
+        },
+        { id: 's-other', assigned_tutor_id: 'other' },
+      ]);
+      const res = await request(server())
         .get('/students?tutor=tutor@example.com')
         .set('x-test-role', 'admin');
-      expect(StudentModel.scan).toHaveBeenCalledWith({
-        assigned_tutor_id: { eq: 'tutor@example.com' },
-      });
+      // The per-slot-tutor predicate runs in code over an unfiltered scan.
+      expect(StudentModel.scan).toHaveBeenCalledWith();
+      expect(res.body.map((s: { id: string }) => s.id)).toEqual([
+        's-assigned',
+        's-slot',
+      ]);
     });
 
     it('a tutor cannot read students', async () => {
@@ -68,9 +86,8 @@ describe('Students & Notes (integration, admin-only)', () => {
         .get('/students?tutor=contact-tutor')
         .set('x-test-role', 'tutor');
       expect(res.status).toBe(200);
-      expect(StudentModel.scan).toHaveBeenCalledWith({
-        assigned_tutor_id: { eq: 'contact-tutor' },
-      });
+      // Widened predicate filters in code — the scan itself is unfiltered.
+      expect(StudentModel.scan).toHaveBeenCalledWith();
     });
 
     it('admin creates a student', async () => {

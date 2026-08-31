@@ -25,6 +25,8 @@ export const StudentsSchema = new dynamoose.Schema({
           weekday: String,
           start_time: String,
           end_time: String,
+          // Optional per-slot tutor override; absent = the assigned tutor.
+          tutor_id: String,
         },
       },
     ],
@@ -76,6 +78,8 @@ export const StudentsSchema = new dynamoose.Schema({
           weekday: String,
           start_time: String,
           end_time: String,
+          // Optional per-slot tutor override; absent = the assigned tutor.
+          tutor_id: String,
         },
       },
     ],

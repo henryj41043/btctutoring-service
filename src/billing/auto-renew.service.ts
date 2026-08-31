@@ -156,10 +156,9 @@ export class AutoRenewService {
 
     let sessionsCreated = 0;
     for (const student of renewable) {
-      const tutor = contacts.find((c) => c.id === student.assigned_tutor_id);
       const monthSessions = this.buildMonthSessions(
         student,
-        tutor,
+        contacts,
         year,
         month,
       );
@@ -174,10 +173,9 @@ export class AutoRenewService {
     // the new schedule here (auto_renew still gates generation).
     for (const student of promotedOnTime) {
       if (!student.auto_renew || !student.schedule?.length) continue;
-      const tutor = contacts.find((c) => c.id === student.assigned_tutor_id);
       const monthSessions = this.buildMonthSessions(
         student,
-        tutor,
+        contacts,
         year,
         month,
       );
@@ -367,14 +365,29 @@ export class AutoRenewService {
 
   private buildMonthSessions(
     student: Student,
-    tutor: Contact | undefined,
+    contacts: Contact[],
     year: number,
     month: number,
   ): Session[] {
     const sessions: Session[] = [];
-    const seriesId = randomUUID();
+    // One series per EFFECTIVE tutor (slot override or the assigned tutor):
+    // series-scoped edits/deletes must never touch another tutor's sessions.
+    const byTutor = new Map<string, { seriesId: string; name: string }>();
+    const tutorEntry = (tutorId: string) => {
+      let entry = byTutor.get(tutorId);
+      if (!entry) {
+        entry = {
+          seriesId: randomUUID(),
+          name: contacts.find((c) => c.id === tutorId)?.first_name ?? '',
+        };
+        byTutor.set(tutorId, entry);
+      }
+      return entry;
+    };
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     for (const slot of student.schedule ?? []) {
+      const effTutorId = slot.tutor_id ?? student.assigned_tutor_id;
+      const entry = tutorEntry(effTutorId);
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(year, month, day);
         if (WEEKDAY_BY_JS_DAY[date.getDay()] !== slot.weekday) continue;
@@ -399,9 +412,9 @@ export class AutoRenewService {
           notes: '',
           student_id: student.id,
           student_name: student.name,
-          tutor_id: student.assigned_tutor_id,
-          tutor_name: tutor?.first_name ?? '',
-          series_id: seriesId,
+          tutor_id: effTutorId,
+          tutor_name: entry.name,
+          series_id: entry.seriesId,
         } as Session);
       }
     }

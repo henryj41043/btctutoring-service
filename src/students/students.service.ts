@@ -130,14 +130,26 @@ export class StudentsService {
       });
   }
 
+  /**
+   * A student is visible to tutor T iff T is their primary (assigned) tutor
+   * OR any live schedule slot names T as its per-slot tutor. The old filtered
+   * scan was already a full-table scan, so filtering in code costs the same.
+   */
+  private isVisibleToTutor(student: Student, tutorId: string): boolean {
+    return (
+      student.assigned_tutor_id === tutorId ||
+      (student.schedule ?? []).some((slot) => slot?.tutor_id === tutorId)
+    );
+  }
+
   async getStudentsByTutor(tutorId: string) {
-    return StudentsModel.scan({
-      assigned_tutor_id: { eq: tutorId },
-    })
+    return StudentsModel.scan()
       .all()
       .exec()
       .then((students) => {
-        return students;
+        return (students as unknown as Student[]).filter((s) =>
+          this.isVisibleToTutor(s, tutorId),
+        );
       })
       .catch((error: Error) => {
         Logger.error(error.message, error);

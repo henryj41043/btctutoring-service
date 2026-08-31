@@ -70,12 +70,44 @@ describe('StudentsService', () => {
       });
     });
 
-    it('getStudentsByTutor scans by assigned_tutor_id', async () => {
-      scanResolves(Model, []);
-      await service.getStudentsByTutor('tutor@example.com');
-      expect(Model.scan).toHaveBeenCalledWith({
-        assigned_tutor_id: { eq: 'tutor@example.com' },
-      });
+    it('getStudentsByTutor includes primary and slot-tutored students only', async () => {
+      scanResolves(Model, [
+        sampleStudent({ id: 'primary', assigned_tutor_id: 't-1' }),
+        sampleStudent({
+          id: 'slot-secondary',
+          assigned_tutor_id: 't-2',
+          schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+            {
+              weekday: 'WEDNESDAY',
+              start_time: '16:00',
+              end_time: '16:45',
+              tutor_id: 't-1',
+            },
+          ],
+        }),
+        sampleStudent({ id: 'other', assigned_tutor_id: 't-2' }),
+        // Regression: slots without tutor_id never match a non-primary tutor.
+        sampleStudent({
+          id: 'no-override',
+          assigned_tutor_id: 't-2',
+          schedule: [
+            { weekday: 'FRIDAY', start_time: '09:00', end_time: '09:30' },
+          ],
+        }),
+        // Malformed slot entries must not throw.
+        sampleStudent({
+          id: 'malformed',
+          assigned_tutor_id: 't-2',
+          schedule: [undefined as never],
+        }),
+      ]);
+      const result = (await service.getStudentsByTutor('t-1')) as {
+        id: string;
+      }[];
+      // Widened predicate runs in code over an unfiltered scan.
+      expect(Model.scan).toHaveBeenCalledWith();
+      expect(result.map((r) => r.id)).toEqual(['primary', 'slot-secondary']);
     });
 
     it('getStudents scans everything', async () => {
