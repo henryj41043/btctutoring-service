@@ -148,6 +148,23 @@ describe('EmailsService', () => {
     });
     afterEach(() => jest.useRealTimers());
 
+    it('re-assigns an already-matched entry to a different contact (the Move action)', async () => {
+      // A tutor's email auto-filed on the TUTOR's page moves to the family's.
+      Model.get.mockResolvedValue(
+        entry({ status: 'matched', contact_id: 'c-tutor' }),
+      );
+      Model.update.mockResolvedValue(entry());
+      await service.assignEmail('hash-1', 'c-family', 'admin-user');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'hash-1' },
+        expect.objectContaining({
+          contact_id: 'c-family',
+          status: 'matched',
+          assigned_by: 'admin-user',
+        }),
+      );
+    });
+
     it('files the entry on the contact with resolver provenance', async () => {
       Model.get.mockResolvedValue(
         entry({ status: 'unmatched', contact_id: undefined }),
