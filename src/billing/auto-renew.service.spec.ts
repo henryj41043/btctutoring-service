@@ -224,6 +224,108 @@ describe('AutoRenewService', () => {
     expect(billing.acquireLock).toHaveBeenCalled();
   });
 
+  describe('per-slot tutors', () => {
+    const spanishTutor = (): Contact =>
+      ({ id: 't-2', first_name: 'Maria' }) as Contact;
+
+    it('generates each slot with its effective tutor and one series per tutor', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+            {
+              weekday: 'WEDNESDAY',
+              start_time: '16:00',
+              end_time: '16:45',
+              tutor_id: 't-2',
+            },
+          ],
+        }),
+      ]);
+      contacts.getContacts.mockResolvedValue([parent(), tutor(), spanishTutor()]);
+      await service.runAutoRenew(july);
+      const created = sessions.createSessions.mock.calls[0][0] as {
+        tutor_id: string;
+        tutor_name: string;
+        series_id: string;
+      }[];
+      const mondays = created.filter((s) => s.tutor_id === 't-1');
+      const wednesdays = created.filter((s) => s.tutor_id === 't-2');
+      expect(mondays).toHaveLength(4); // July 2026 Mondays
+      expect(wednesdays).toHaveLength(5); // July 2026 Wednesdays
+      expect(mondays[0].tutor_name).toBe('Tess');
+      expect(wednesdays[0].tutor_name).toBe('Maria');
+      // One series per effective tutor; stable within each tutor's sessions.
+      expect(new Set(created.map((s) => s.series_id)).size).toBe(2);
+      expect(new Set(mondays.map((s) => s.series_id)).size).toBe(1);
+      expect(new Set(wednesdays.map((s) => s.series_id)).size).toBe(1);
+    });
+
+    it('without slot overrides everything matches the old single-series output', async () => {
+      await service.runAutoRenew(july); // default fixture: 2 slots, no tutor_id
+      const created = sessions.createSessions.mock.calls[0][0] as {
+        tutor_id: string;
+        tutor_name: string;
+        series_id: string;
+      }[];
+      expect(created).toHaveLength(9);
+      expect(created.every((s) => s.tutor_id === 't-1')).toBe(true);
+      expect(created.every((s) => s.tutor_name === 'Tess')).toBe(true);
+      expect(new Set(created.map((s) => s.series_id)).size).toBe(1);
+    });
+
+    it('an unknown slot tutor still generates, with a blank name', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          schedule: [
+            {
+              weekday: 'MONDAY',
+              start_time: '10:00',
+              end_time: '10:30',
+              tutor_id: 't-ghost',
+            },
+          ],
+        }),
+      ]);
+      await service.runAutoRenew(july);
+      const created = sessions.createSessions.mock.calls[0][0] as {
+        tutor_id: string;
+        tutor_name: string;
+      }[];
+      expect(created[0].tutor_id).toBe('t-ghost');
+      expect(created[0].tutor_name).toBe('');
+    });
+
+    it('a promoted pending schedule generates with its slot tutors', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          schedule: [
+            { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-07-01',
+          pending_schedule: [
+            {
+              weekday: 'MONDAY',
+              start_time: '10:00',
+              end_time: '10:30',
+              tutor_id: 't-2',
+            },
+          ],
+        }),
+      ]);
+      contacts.getContacts.mockResolvedValue([parent(), tutor(), spanishTutor()]);
+      await service.runAutoRenew(july);
+      const created = sessions.createSessions.mock.calls[0][0] as {
+        tutor_id: string;
+        tutor_name: string;
+      }[];
+      expect(created).toHaveLength(4); // Mondays from the promoted schedule
+      expect(created[0].tutor_id).toBe('t-2');
+      expect(created[0].tutor_name).toBe('Maria');
+    });
+  });
+
   describe('scheduled package changes', () => {
     // Run month: September 2026 (the cron fires on the 1st).
     const september = new Date(2026, 8, 1);
