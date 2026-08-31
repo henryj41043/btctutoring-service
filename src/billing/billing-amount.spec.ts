@@ -8,10 +8,10 @@ import {
   studentMonthlyCharge,
 } from './billing-amount';
 import { Student } from '../models/student.model';
-import { Package } from './package.enum';
+import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 
 const succeed = (over: Partial<Student> = {}): Student =>
-  ({ package: Package.SUCCEED, ...over }) as Student;
+  ({ package: 'Succeed', ...over }) as Student;
 
 describe('studentMonthlyCharge (service)', () => {
   it('charges the full monthly cost for an ongoing month', () => {
@@ -20,6 +20,7 @@ describe('studentMonthlyCharge (service)', () => {
         succeed({ package_start_date: '2026-05-01T00:00:00' }),
         2026,
         6,
+        TEST_CATALOG,
       ),
     ).toBe(362);
   });
@@ -30,6 +31,7 @@ describe('studentMonthlyCharge (service)', () => {
         succeed({ package_start_date: '2026-07-01T00:00:00' }),
         2026,
         6,
+        TEST_CATALOG,
       ),
     ).toBe(362);
   });
@@ -40,17 +42,23 @@ describe('studentMonthlyCharge (service)', () => {
         succeed({ package_start_date: '2026-08-01T00:00:00' }),
         2026,
         6,
+        TEST_CATALOG,
       ),
     ).toBe(0);
   });
 
   it('charges full for a legacy student with no start date', () => {
-    expect(studentMonthlyCharge(succeed(), 2026, 6)).toBe(362);
+    expect(studentMonthlyCharge(succeed(), 2026, 6, TEST_CATALOG)).toBe(362);
   });
 
   it('charges zero for an unconfigured custom package', () => {
     expect(
-      studentMonthlyCharge(succeed({ package: Package.CUSTOM }), 2026, 6),
+      studentMonthlyCharge(
+        succeed({ package: 'Custom' }),
+        2026,
+        6,
+        TEST_CATALOG,
+      ),
     ).toBe(0);
   });
 
@@ -58,7 +66,7 @@ describe('studentMonthlyCharge (service)', () => {
     // July 2026 Wednesdays: 1, 8, 15, 22, 29. Start Jul 15 → 3 remaining →
     // perSession round(400*12/52,2)=92.31 → round(92.31*3,2)=276.93.
     const student = {
-      package: Package.CUSTOM,
+      package: 'Custom',
       custom_monthly_cost: 400,
       custom_sessions_per_week: 1,
       custom_session_length_min: 45,
@@ -67,7 +75,7 @@ describe('studentMonthlyCharge (service)', () => {
         { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:45' },
       ],
     } as Student;
-    expect(studentMonthlyCharge(student, 2026, 6)).toBe(276.93);
+    expect(studentMonthlyCharge(student, 2026, 6, TEST_CATALOG)).toBe(276.93);
   });
 
   it('charges one per-session cost when a single session remains (regression)', () => {
@@ -80,7 +88,7 @@ describe('studentMonthlyCharge (service)', () => {
         { weekday: 'THURSDAY', start_time: '10:00', end_time: '10:30' },
       ] as Student['schedule'],
     });
-    expect(studentMonthlyCharge(student, 2026, 5)).toBe(41.77);
+    expect(studentMonthlyCharge(student, 2026, 5, TEST_CATALOG)).toBe(41.77);
   });
 
   it('falls back to full cost when a mid-month starter has no schedule', () => {
@@ -89,6 +97,7 @@ describe('studentMonthlyCharge (service)', () => {
         succeed({ package_start_date: '2026-07-31T00:00:00' }),
         2026,
         6,
+        TEST_CATALOG,
       ),
     ).toBe(362);
   });
@@ -97,7 +106,7 @@ describe('studentMonthlyCharge (service)', () => {
     // New package prorates from Jul 15 (3 Wednesdays → 276.93, as above) and the
     // stored old-package portion ($120) is added on top — but only for 2026-07.
     const student = {
-      package: Package.CUSTOM,
+      package: 'Custom',
       custom_monthly_cost: 400,
       custom_sessions_per_week: 1,
       custom_session_length_min: 45,
@@ -108,9 +117,9 @@ describe('studentMonthlyCharge (service)', () => {
       mid_month_prior_charge: 120,
       mid_month_change_period: '2026-07',
     } as Student;
-    expect(studentMonthlyCharge(student, 2026, 6)).toBe(396.93);
+    expect(studentMonthlyCharge(student, 2026, 6, TEST_CATALOG)).toBe(396.93);
     // The adjustment does not leak into any other month.
-    expect(studentMonthlyCharge(student, 2026, 7)).toBe(400);
+    expect(studentMonthlyCharge(student, 2026, 7, TEST_CATALOG)).toBe(400);
   });
 });
 
@@ -266,13 +275,13 @@ describe('studentMonthlyCharge with a scheduled package change', () => {
     }) as never;
 
   it('charges the old package before and the new from the effective month', () => {
-    expect(studentMonthlyCharge(student(), 2026, 7)).toBe(362); // August
-    expect(studentMonthlyCharge(student(), 2026, 8)).toBe(546); // September
+    expect(studentMonthlyCharge(student(), 2026, 7, TEST_CATALOG)).toBe(362); // August
+    expect(studentMonthlyCharge(student(), 2026, 8, TEST_CATALOG)).toBe(546); // September
   });
 
   it('handles a year-boundary effective date', () => {
     const s = student({ pending_package_effective: '2027-01-01' });
-    expect(studentMonthlyCharge(s, 2026, 11)).toBe(362); // December
-    expect(studentMonthlyCharge(s, 2027, 0)).toBe(546); // January
+    expect(studentMonthlyCharge(s, 2026, 11, TEST_CATALOG)).toBe(362); // December
+    expect(studentMonthlyCharge(s, 2027, 0, TEST_CATALOG)).toBe(546); // January
   });
 });

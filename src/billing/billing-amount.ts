@@ -1,5 +1,10 @@
 import { Student } from '../models/student.model';
-import { PackageDef, resolvePackageDef, round2 } from './package-config';
+import {
+  PackageCatalog,
+  PackageDef,
+  resolvePackageDef,
+  round2,
+} from './package-config';
 import { countRemainingSlots, proratedFirstMonthCost } from './proration';
 
 /** A month key 'YYYY-MM' (month is 0-indexed) — the mid-month-change tag format. */
@@ -101,9 +106,10 @@ export function studentMonthlyCharge(
   student: Student,
   year: number,
   month: number,
+  catalog: PackageCatalog,
 ): number {
   const fields = packageFieldsForMonth(student, year, month);
-  const def = resolvePackageDef(fields.package, {
+  const def = resolvePackageDef(fields.package, catalog, {
     monthlyCost: fields.custom_monthly_cost,
     sessionsPerWeek: fields.custom_sessions_per_week,
     sessionLengthMin: fields.custom_session_length_min,

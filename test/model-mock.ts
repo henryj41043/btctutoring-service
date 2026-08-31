@@ -10,6 +10,7 @@
 export interface ModelMock extends jest.Mock {
   scan: jest.Mock;
   get: jest.Mock;
+  create: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
   batchPut: jest.Mock;
@@ -31,6 +32,7 @@ export function makeModelMock(): ModelMock {
   const ctor = jest.fn(() => ({ save })) as unknown as ModelMock;
   ctor.scan = jest.fn();
   ctor.get = jest.fn();
+  ctor.create = jest.fn();
   ctor.update = jest.fn();
   ctor.delete = jest.fn();
   ctor.batchPut = jest.fn();

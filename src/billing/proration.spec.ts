@@ -3,8 +3,7 @@ import {
   proratedFirstMonthCost,
   semiMonthlySplit,
 } from './proration';
-import { PACKAGE_CONFIG } from './package-config';
-import { Package } from './package.enum';
+import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 import { ScheduleSlot } from '../models/student.model';
 
 // July 2026: the 1st is a Wednesday. Wednesdays 1,8,15,22,29; Mondays 6,13,20,27.
@@ -41,7 +40,7 @@ describe('proration (service)', () => {
   });
 
   it('charges per-session cost × remaining sessions, capped at the monthly cost', () => {
-    const succeed = PACKAGE_CONFIG[Package.SUCCEED]; // $362, perSession $41.77
+    const succeed = TEST_CATALOG['Succeed']; // $362, perSession $41.77
     expect(proratedFirstMonthCost(succeed, 1)).toBe(41.77);
     expect(proratedFirstMonthCost(succeed, 2)).toBe(83.54);
     expect(proratedFirstMonthCost(succeed, 0)).toBe(0);

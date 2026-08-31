@@ -5,11 +5,16 @@ import { StudentsService } from '../students/students.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { BillingService } from './billing.service';
+import { PackagesService } from '../packages/packages.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
-import { resolvePackageDef, round2 } from './package-config';
-import { Package } from './package.enum';
+import {
+  CUSTOM_PACKAGE,
+  PackageCatalog,
+  resolvePackageDef,
+  round2,
+} from './package-config';
 import { semiMonthlySplit } from './proration';
 import {
   studentMonthlyCharge,
@@ -51,6 +56,7 @@ export class AutoRenewService {
     private readonly sessions: SessionsService,
     private readonly contacts: ContactsService,
     private readonly billing: BillingService,
+    private readonly packages: PackagesService,
   ) {}
 
   // 06:00 (container time, UTC on Fargate) on the 1st of every month.
@@ -71,6 +77,16 @@ export class AutoRenewService {
     const year = now.getFullYear();
     const month = now.getMonth();
     const lockId = `lock#auto-renew#${this.monthKey(year, month)}`;
+
+    // Fetched BEFORE the lock: an empty (unseeded/broken) catalog must leave
+    // the month lock unclaimed so a re-run after fixing the data still bills.
+    const catalog = await this.packages.getCatalog();
+    if (Object.keys(catalog).length === 0) {
+      this.logger.error(
+        'Auto-renew aborted: the package catalog is empty — seed the Packages table and re-run.',
+      );
+      return { sessionsCreated: 0, billingRecords: 0, skipped: true };
+    }
 
     const acquired = await this.billing.acquireLock(lockId);
     if (!acquired) {
@@ -117,7 +133,7 @@ export class AutoRenewService {
       const onTime = student.pending_package_effective === monthStartKey;
       student.package = student.pending_package;
       student.package_start_date = `${student.pending_package_effective}T00:00:00`;
-      if (student.package === (Package.CUSTOM as string)) {
+      if (student.package === CUSTOM_PACKAGE) {
         student.custom_monthly_cost = student.pending_custom_monthly_cost;
         student.custom_sessions_per_week =
           student.pending_custom_sessions_per_week;
@@ -205,12 +221,12 @@ export class AutoRenewService {
       );
       const preDiscount = round2(
         contactStudents.reduce(
-          (sum, s) => sum + studentMonthlyCharge(s, year, month),
+          (sum, s) => sum + studentMonthlyCharge(s, year, month, catalog),
           0,
         ),
       );
       const enrolledCount = contactStudents.filter((s) =>
-        this.isEnrolled(s),
+        this.isEnrolled(s, catalog),
       ).length;
       const total = siblingDiscountedTotal(
         preDiscount,
@@ -337,9 +353,9 @@ export class AutoRenewService {
   }
 
   /** True when a student has a resolvable package — i.e. is enrolled and billable. */
-  private isEnrolled(student: Student): boolean {
+  private isEnrolled(student: Student, catalog: PackageCatalog): boolean {
     return (
-      resolvePackageDef(student.package, {
+      resolvePackageDef(student.package, catalog, {
         monthlyCost: student.custom_monthly_cost,
         sessionsPerWeek: student.custom_sessions_per_week,
         sessionLengthMin: student.custom_session_length_min,
