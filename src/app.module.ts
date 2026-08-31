@@ -17,6 +17,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
 import { EmailsModule } from './emails/emails.module';
 import { ScholarshipsModule } from './scholarships/scholarships.module';
+import { PackagesModule } from './packages/packages.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ScholarshipsModule } from './scholarships/scholarships.module';
     BillingModule,
     EmailsModule,
     ScholarshipsModule,
+    PackagesModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],

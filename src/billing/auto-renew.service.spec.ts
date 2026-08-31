@@ -1,6 +1,7 @@
 import { AutoRenewService } from './auto-renew.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
+import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 
 describe('AutoRenewService', () => {
   let service: AutoRenewService;
@@ -11,6 +12,7 @@ describe('AutoRenewService', () => {
     acquireLock: jest.fn(),
     createBillingRecordIfAbsent: jest.fn(),
   };
+  const packages = { getCatalog: jest.fn() };
 
   const student = (over: Partial<Student> = {}): Student =>
     ({
@@ -46,7 +48,9 @@ describe('AutoRenewService', () => {
       sessions as any,
       contacts as any,
       billing as any,
+      packages as any,
     );
+    packages.getCatalog.mockResolvedValue(TEST_CATALOG);
     billing.acquireLock.mockResolvedValue(true);
     billing.createBillingRecordIfAbsent.mockResolvedValue({
       id: 'x',
@@ -68,6 +72,27 @@ describe('AutoRenewService', () => {
     expect(result.skipped).toBe(true);
     expect(sessions.createSessions).not.toHaveBeenCalled();
     expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it('aborts on an empty package catalog WITHOUT claiming the month lock', async () => {
+    packages.getCatalog.mockResolvedValue({});
+    const result = await service.runAutoRenew(july);
+    expect(result.skipped).toBe(true);
+    // The lock stays free so a re-run after seeding still bills the month.
+    expect(billing.acquireLock).not.toHaveBeenCalled();
+    expect(sessions.createSessions).not.toHaveBeenCalled();
+    expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it('a student on a RETIRED package still bills at its catalog price', async () => {
+    packages.getCatalog.mockResolvedValue({
+      ...TEST_CATALOG,
+      Succeed: { ...TEST_CATALOG['Succeed'], retired: true },
+    });
+    await service.runAutoRenew(july);
+    expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 362 }),
+    );
   });
 
   it('generates the new month of sessions for an auto-renew student', async () => {
@@ -242,7 +267,11 @@ describe('AutoRenewService', () => {
           ],
         }),
       ]);
-      contacts.getContacts.mockResolvedValue([parent(), tutor(), spanishTutor()]);
+      contacts.getContacts.mockResolvedValue([
+        parent(),
+        tutor(),
+        spanishTutor(),
+      ]);
       await service.runAutoRenew(july);
       const created = sessions.createSessions.mock.calls[0][0] as {
         tutor_id: string;
@@ -314,7 +343,11 @@ describe('AutoRenewService', () => {
           ],
         }),
       ]);
-      contacts.getContacts.mockResolvedValue([parent(), tutor(), spanishTutor()]);
+      contacts.getContacts.mockResolvedValue([
+        parent(),
+        tutor(),
+        spanishTutor(),
+      ]);
       await service.runAutoRenew(july);
       const created = sessions.createSessions.mock.calls[0][0] as {
         tutor_id: string;

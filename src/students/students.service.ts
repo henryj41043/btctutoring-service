@@ -5,7 +5,7 @@ import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
 import { OnboardingRow } from '../models/onboarding-row.model';
 import { STUDENT_STATUS } from './student-status';
-import { Package } from '../billing/package.enum';
+import { CUSTOM_PACKAGE } from '../billing/package-config';
 import { randomUUID } from 'crypto';
 
 /** Max keys per dynamoose batchGet request. */
@@ -67,7 +67,8 @@ export class StudentsService {
       mid_month_change_period: student.mid_month_change_period,
       pending_package: student.pending_package,
       pending_custom_monthly_cost: student.pending_custom_monthly_cost,
-      pending_custom_sessions_per_week: student.pending_custom_sessions_per_week,
+      pending_custom_sessions_per_week:
+        student.pending_custom_sessions_per_week,
       pending_custom_session_length_min:
         student.pending_custom_session_length_min,
       pending_package_effective: student.pending_package_effective,
@@ -357,7 +358,7 @@ export class StudentsService {
    * has no scalar-$REMOVE path.
    */
   async promotePendingPackage(student: Student): Promise<void> {
-    const isCustom = student.pending_package === (Package.CUSTOM as string);
+    const isCustom = student.pending_package === CUSTOM_PACKAGE;
     const sets: Record<string, unknown> = {
       package: student.pending_package,
       // Zoneless local-wall stamp (mid-month precedent): a bare 'YYYY-MM-DD'

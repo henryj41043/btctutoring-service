@@ -1,57 +1,58 @@
 import {
-  PACKAGE_CONFIG,
+  CUSTOM_PACKAGE,
   perSessionCost,
   resolvePackageDef,
   weeklyCost,
 } from './package-config';
-import { Package } from './package.enum';
+import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 
 describe('package-config (service)', () => {
-  it('defines every package except CUSTOM', () => {
-    for (const pkg of Object.values(Package)) {
-      if (pkg === Package.CUSTOM) continue;
-      const def = PACKAGE_CONFIG[pkg];
-      expect(def.monthlyCost).toBeGreaterThan(0);
-      expect(def.sessionsPerWeek).toBeGreaterThan(0);
-      expect(def.sessionLengthMin).toBeGreaterThan(0);
-    }
-  });
-
-  it('resolves the Apex package (5×60min, $1820/mo)', () => {
-    expect(resolvePackageDef(Package.APEX)).toEqual({
+  it('resolves a named package from the catalog', () => {
+    expect(resolvePackageDef('Apex', TEST_CATALOG)).toEqual({
       monthlyCost: 1820,
       sessionsPerWeek: 5,
       sessionLengthMin: 60,
     });
   });
 
-  it('derives Succeed weekly and per-session costs', () => {
-    const def = PACKAGE_CONFIG[Package.SUCCEED];
-    expect(weeklyCost(def)).toBe(83.54);
-    expect(perSessionCost(def)).toBe(41.77);
-  });
-
-  it('resolves a standard package', () => {
-    expect(resolvePackageDef(Package.THRIVE)).toEqual({
-      monthlyCost: 181,
+  it('resolves a RETIRED package (students on it keep billing)', () => {
+    const catalog = {
+      Legacy: {
+        monthlyCost: 300,
+        sessionsPerWeek: 1,
+        sessionLengthMin: 30,
+        retired: true,
+      },
+    };
+    expect(resolvePackageDef('Legacy', catalog)).toEqual({
+      monthlyCost: 300,
       sessionsPerWeek: 1,
       sessionLengthMin: 30,
     });
   });
 
-  it('returns null for undefined, unknown, or unconfigured custom', () => {
-    expect(resolvePackageDef(undefined)).toBeNull();
-    expect(resolvePackageDef('Nonexistent')).toBeNull();
-    expect(resolvePackageDef(Package.CUSTOM)).toBeNull();
-    expect(resolvePackageDef(Package.CUSTOM, { monthlyCost: 400 })).toBeNull();
+  it('derives Succeed weekly and per-session costs', () => {
+    const def = TEST_CATALOG['Succeed'];
+    expect(weeklyCost(def)).toBe(83.54);
+    expect(perSessionCost(def)).toBe(41.77);
   });
 
-  it('returns the override for a configured custom package', () => {
+  it('returns null for undefined, unknown, empty catalog, or unconfigured custom', () => {
+    expect(resolvePackageDef(undefined, TEST_CATALOG)).toBeNull();
+    expect(resolvePackageDef('Nonexistent', TEST_CATALOG)).toBeNull();
+    expect(resolvePackageDef('Apex', {})).toBeNull();
+    expect(resolvePackageDef(CUSTOM_PACKAGE, TEST_CATALOG)).toBeNull();
+    expect(
+      resolvePackageDef(CUSTOM_PACKAGE, TEST_CATALOG, { monthlyCost: 400 }),
+    ).toBeNull();
+  });
+
+  it('returns the override for a configured custom package (catalog ignored)', () => {
     const override = {
       monthlyCost: 400,
       sessionsPerWeek: 2,
       sessionLengthMin: 50,
     };
-    expect(resolvePackageDef(Package.CUSTOM, override)).toEqual(override);
+    expect(resolvePackageDef(CUSTOM_PACKAGE, {}, override)).toEqual(override);
   });
 });

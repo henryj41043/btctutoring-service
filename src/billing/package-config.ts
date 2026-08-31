@@ -1,81 +1,30 @@
-import { Package } from './package.enum';
+/**
+ * Package definitions resolve from the admin-managed catalog (the Packages
+ * DynamoDB table) — no more hardcoded config. Callers fetch the catalog once
+ * per run/request (PackagesService.getCatalog) and thread it through these
+ * pure helpers. Mirror of the frontend helpers
+ * (btctutoring-app/src/app/utils/package-config.ts). Keep the two in sync.
+ */
 
 /**
- * Server-side mirror of the frontend package definitions
- * (btctutoring-app/src/app/utils/package-config.ts). Used by the auto-renew job
- * and any server-side billing-amount snapshotting. Keep the two in sync.
+ * The one package that never lives in the catalog: a code-level marker for
+ * per-student overrides (custom_monthly_cost / custom_sessions_per_week /
+ * custom_session_length_min).
  */
+export const CUSTOM_PACKAGE = 'Custom';
+
 export interface PackageDef {
   monthlyCost: number;
   sessionsPerWeek: number;
   sessionLengthMin: number;
 }
 
-export const PACKAGE_CONFIG: Record<
-  Exclude<Package, Package.CUSTOM>,
-  PackageDef
-> = {
-  [Package.THRIVE]: {
-    monthlyCost: 181,
-    sessionsPerWeek: 1,
-    sessionLengthMin: 30,
-  },
-  [Package.EXCEL]: {
-    monthlyCost: 273,
-    sessionsPerWeek: 1,
-    sessionLengthMin: 45,
-  },
-  [Package.SUCCEED]: {
-    monthlyCost: 362,
-    sessionsPerWeek: 2,
-    sessionLengthMin: 30,
-  },
-  [Package.ACHIEVE]: {
-    monthlyCost: 546,
-    sessionsPerWeek: 3,
-    sessionLengthMin: 30,
-  },
-  [Package.VICTORY]: {
-    monthlyCost: 546,
-    sessionsPerWeek: 2,
-    sessionLengthMin: 45,
-  },
-  [Package.EMPOWER]: {
-    monthlyCost: 819,
-    sessionsPerWeek: 3,
-    sessionLengthMin: 45,
-  },
-  [Package.DETERMINATION]: {
-    monthlyCost: 728,
-    sessionsPerWeek: 2,
-    sessionLengthMin: 60,
-  },
-  [Package.TRIUMPH]: {
-    monthlyCost: 728,
-    sessionsPerWeek: 4,
-    sessionLengthMin: 30,
-  },
-  [Package.POWER_UP]: {
-    monthlyCost: 1092,
-    sessionsPerWeek: 3,
-    sessionLengthMin: 60,
-  },
-  [Package.CONQUEST]: {
-    monthlyCost: 1092,
-    sessionsPerWeek: 4,
-    sessionLengthMin: 45,
-  },
-  [Package.SUMMIT]: {
-    monthlyCost: 1456,
-    sessionsPerWeek: 4,
-    sessionLengthMin: 60,
-  },
-  [Package.APEX]: {
-    monthlyCost: 1820,
-    sessionsPerWeek: 5,
-    sessionLengthMin: 60,
-  },
-};
+/**
+ * Package name → definition, built from the Packages table. Retired entries
+ * are INCLUDED — they keep resolving for students still on them; `retired`
+ * only governs whether a package is offered for NEW selections.
+ */
+export type PackageCatalog = Record<string, PackageDef & { retired?: boolean }>;
 
 export function round2(value: number): number {
   return Math.round(value * 100) / 100;
@@ -83,10 +32,11 @@ export function round2(value: number): number {
 
 export function resolvePackageDef(
   pkg: string | undefined,
+  catalog: PackageCatalog,
   override?: Partial<PackageDef> | null,
 ): PackageDef | null {
   if (!pkg) return null;
-  if (pkg === (Package.CUSTOM as string)) {
+  if (pkg === CUSTOM_PACKAGE) {
     if (
       override &&
       override.monthlyCost != null &&
@@ -97,7 +47,13 @@ export function resolvePackageDef(
     }
     return null;
   }
-  return PACKAGE_CONFIG[pkg as Exclude<Package, Package.CUSTOM>] ?? null;
+  const entry = catalog[pkg];
+  if (!entry) return null;
+  return {
+    monthlyCost: entry.monthlyCost,
+    sessionsPerWeek: entry.sessionsPerWeek,
+    sessionLengthMin: entry.sessionLengthMin,
+  };
 }
 
 export function weeklyCost(def: PackageDef): number {
