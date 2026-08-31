@@ -70,6 +70,11 @@ export const PACKAGE_CONFIG: Record<
     sessionsPerWeek: 4,
     sessionLengthMin: 60,
   },
+  [Package.APEX]: {
+    monthlyCost: 1820,
+    sessionsPerWeek: 5,
+    sessionLengthMin: 60,
+  },
 };
 
 export function round2(value: number): number {

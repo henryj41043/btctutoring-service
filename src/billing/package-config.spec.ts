@@ -17,6 +17,14 @@ describe('package-config (service)', () => {
     }
   });
 
+  it('resolves the Apex package (5×60min, $1820/mo)', () => {
+    expect(resolvePackageDef(Package.APEX)).toEqual({
+      monthlyCost: 1820,
+      sessionsPerWeek: 5,
+      sessionLengthMin: 60,
+    });
+  });
+
   it('derives Succeed weekly and per-session costs', () => {
     const def = PACKAGE_CONFIG[Package.SUCCEED];
     expect(weeklyCost(def)).toBe(83.54);
