@@ -327,23 +327,33 @@ export class SessionsService {
   }
 
   async updateSession(session: Session) {
+    const attributes: Record<string, unknown> = {
+      type: session.type,
+      end_datetime: session.end_datetime,
+      notes: session.notes,
+      start_datetime: session.start_datetime,
+      status: session.status,
+      student_id: session.student_id,
+      student_name: session.student_name,
+      tutor_id: session.tutor_id,
+      tutor_name: session.tutor_name,
+      series_id: session.series_id,
+      participants: session.participants,
+    };
+    // Undefined values must not reach dynamoose: for the array-typed
+    // `participants` it wraps the value into [undefined] and rejects the
+    // whole update ("Expected participants.0 to be of type object") — which
+    // broke every non-GROUP session edit.
+    for (const key of Object.keys(attributes)) {
+      if (attributes[key] === undefined) {
+        delete attributes[key];
+      }
+    }
     return SessionsModel.update(
       {
         id: session.id,
       },
-      {
-        type: session.type,
-        end_datetime: session.end_datetime,
-        notes: session.notes,
-        start_datetime: session.start_datetime,
-        status: session.status,
-        student_id: session.student_id,
-        student_name: session.student_name,
-        tutor_id: session.tutor_id,
-        tutor_name: session.tutor_name,
-        series_id: session.series_id,
-        participants: session.participants,
-      },
+      attributes,
     )
       .then((updatedSession) => {
         return updatedSession;

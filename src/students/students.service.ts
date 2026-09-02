@@ -135,8 +135,9 @@ export class StudentsService {
    * A student is visible to tutor T iff T is their primary (assigned) tutor
    * OR any live schedule slot names T as its per-slot tutor. The old filtered
    * scan was already a full-table scan, so filtering in code costs the same.
+   * Public: the controller also uses it to scope a tutor's make-up write.
    */
-  private isVisibleToTutor(student: Student, tutorId: string): boolean {
+  isVisibleToTutor(student: Student, tutorId: string): boolean {
     return (
       student.assigned_tutor_id === tutorId ||
       (student.schedule ?? []).some((slot) => slot?.tutor_id === tutorId)
@@ -334,6 +335,46 @@ export class StudentsService {
     }
     const update =
       remove.length > 0 ? { $SET: attributes, $REMOVE: remove } : attributes;
+    return StudentsModel.update(
+      {
+        id: student.id,
+      },
+      update,
+    )
+      .then((updatedStudent) => {
+        return updatedStudent;
+      })
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /**
+   * The ONLY student write a tutor may perform: the attendance-driven
+   * make-up bank change (a cancelled session banks its minutes; a finalized
+   * make-up consumes them). Least privilege — only the two make-up fields
+   * are applied from the payload; everything else stays admin-only through
+   * updateStudent.
+   */
+  async updateStudentMakeup(student: Student) {
+    const batches = Array.isArray(student.make_up_batches)
+      ? student.make_up_batches.filter((b) => b && typeof b === 'object')
+      : undefined;
+    const sets: Record<string, unknown> = {};
+    if (typeof student.make_up_minutes === 'number') {
+      sets.make_up_minutes = student.make_up_minutes;
+    }
+    if (batches && batches.length > 0) {
+      sets.make_up_batches = batches;
+    }
+    // An explicitly empty batch list means "all consumed/expired" — clear it
+    // (updateStudent precedent: $SET only writes provided keys).
+    const remove: string[] = [];
+    if (this.isMakeupBatchesCleared(student)) {
+      remove.push('make_up_batches');
+    }
+    const update = remove.length > 0 ? { $SET: sets, $REMOVE: remove } : sets;
     return StudentsModel.update(
       {
         id: student.id,

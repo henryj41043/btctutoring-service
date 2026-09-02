@@ -281,6 +281,21 @@ describe('SessionsService', () => {
       expect(result).toBe(updated);
     });
 
+    it('omits undefined attributes — a non-GROUP session must not send participants', async () => {
+      // Regression: dynamoose wraps a non-array value for the array-typed
+      // participants attribute into [undefined] and rejects the update
+      // ("Expected participants.0 to be of type object"), which broke every
+      // tutoring/trial/make-up session edit.
+      Model.update.mockResolvedValue(sampleSession());
+      await service.updateSession(sampleSession());
+      const attributes = Model.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect('participants' in attributes).toBe(false);
+      expect(Object.values(attributes)).not.toContain(undefined);
+    });
+
     it('persists a roster change through update', async () => {
       const participants = [{ id: 's-c', name: 'Cy' }];
       Model.update.mockResolvedValue(sampleSession());
