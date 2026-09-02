@@ -99,6 +99,23 @@ describe('ScholarshipsService', () => {
       });
     });
 
+    it('strips null/undefined fields — an emptied date must not reach dynamoose (regression)', async () => {
+      // The form sends null for empty optional dates; dynamoose rejects null
+      // for Date attributes ("Expected date_funds_requested_by_btc to be of
+      // type date, instead found type null") and the whole save failed.
+      Model.__save.mockResolvedValue(undefined);
+      await service.upsertScholarshipRecord(
+        sampleRecord({
+          date_funds_requested_by_btc: null as never,
+          invoice_paid_date: undefined,
+        }),
+      );
+      const attrs = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(attrs).not.toHaveProperty('date_funds_requested_by_btc');
+      expect(attrs).not.toHaveProperty('invoice_paid_date');
+      expect(attrs.id).toBe('contact-1#2026-08');
+    });
+
     it('propagates save failures', async () => {
       Model.__save.mockRejectedValue(new Error('save boom'));
       await expect(

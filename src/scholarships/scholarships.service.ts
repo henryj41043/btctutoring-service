@@ -59,7 +59,7 @@ export class ScholarshipsService {
    */
   async upsertScholarshipRecord(record: ScholarshipRecord) {
     const id = ScholarshipsService.recordId(record.contact_id, record.month);
-    const item = new ScholarshipsModel({
+    const attributes: Record<string, unknown> = {
       id,
       contact_id: record.contact_id,
       month: record.month,
@@ -69,7 +69,17 @@ export class ScholarshipsService {
       date_funds_requested_by_family: record.date_funds_requested_by_family,
       invoice_number: record.invoice_number,
       invoice_paid_date: record.invoice_paid_date,
-    });
+    };
+    // The form sends null for empty optional fields, and dynamoose rejects
+    // null for typed (notably Date) attributes ("Expected ... to be of type
+    // date, instead found type null"). save() is a full replace, so stripped
+    // keys simply drop from the stored record — exactly what clearing means.
+    for (const key of Object.keys(attributes)) {
+      if (attributes[key] === null || attributes[key] === undefined) {
+        delete attributes[key];
+      }
+    }
+    const item = new ScholarshipsModel(attributes);
     return item
       .save()
       .then(() => {
