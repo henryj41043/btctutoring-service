@@ -418,6 +418,64 @@ describe('StudentsService', () => {
     });
   });
 
+  describe('updateStudentMakeup (tutor-scoped attendance write)', () => {
+    it('writes ONLY the make-up fields — never the rest of the payload', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudentMakeup(
+        sampleStudent({
+          make_up_minutes: 30,
+          make_up_batches: [{ minutes: 30, earned_date: '2026-09-01' }],
+          package: 'Apex',
+          assigned_tutor_id: 't-hax',
+          custom_monthly_cost: 1,
+        }),
+      );
+      const upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd).toEqual({
+        make_up_minutes: 30,
+        make_up_batches: [{ minutes: 30, earned_date: '2026-09-01' }],
+      });
+    });
+
+    it('clears an explicitly emptied batch list via $REMOVE (all consumed)', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudentMakeup(
+        sampleStudent({ make_up_minutes: 0, make_up_batches: [] }),
+      );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        {
+          $SET: { make_up_minutes: 0 },
+          $REMOVE: ['make_up_batches'],
+        },
+      );
+    });
+
+    it('filters malformed batch entries and tolerates absent fields', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudentMakeup(
+        sampleStudent({
+          make_up_minutes: undefined,
+          make_up_batches: [
+            null,
+            { minutes: 15, earned_date: '2026-09-01' },
+          ] as never,
+        }),
+      );
+      const upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd).toEqual({
+        make_up_batches: [{ minutes: 15, earned_date: '2026-09-01' }],
+      });
+    });
+
+    it('rejects when the update fails', async () => {
+      Model.update.mockRejectedValue(new Error('makeup boom'));
+      await expect(
+        service.updateStudentMakeup(sampleStudent({ make_up_minutes: 10 })),
+      ).rejects.toThrow('makeup boom');
+    });
+  });
+
   describe('updateStudent', () => {
     it('updates and returns the student', async () => {
       const updated = sampleStudent({ status: 'Inactive' });
