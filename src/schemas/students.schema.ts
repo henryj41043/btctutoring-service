@@ -55,6 +55,21 @@ export const StudentsSchema = new dynamoose.Schema({
   make_up_never_expire: Boolean,
   // Extra tutor planning minutes credited per counted session (payroll).
   extra_planning_minutes: Number,
+  // Per-tutor overrides of extra_planning_minutes (default + overrides model):
+  // a tutor listed here earns THIS many extra planning minutes per counted
+  // session with the student; unlisted tutors earn the default above.
+  extra_planning_by_tutor: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          tutor_id: String,
+          minutes: Number,
+        },
+      },
+    ],
+  },
   // Mid-month package change: the old package's prorated portion for the change
   // month, applied on top of the new package's charge only in that month.
   mid_month_prior_charge: Number,

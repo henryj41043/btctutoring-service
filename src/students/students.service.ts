@@ -40,6 +40,9 @@ export class StudentsService {
     const makeUpBatches = Array.isArray(student.make_up_batches)
       ? student.make_up_batches.filter((b) => b && typeof b === 'object')
       : undefined;
+    const planningOverrides = Array.isArray(student.extra_planning_by_tutor)
+      ? student.extra_planning_by_tutor.filter((o) => o && typeof o === 'object')
+      : undefined;
 
     const candidate: Record<string, unknown> = {
       contact_id: student.contact_id,
@@ -63,6 +66,10 @@ export class StudentsService {
         makeUpBatches && makeUpBatches.length > 0 ? makeUpBatches : undefined,
       make_up_never_expire: student.make_up_never_expire,
       extra_planning_minutes: student.extra_planning_minutes,
+      extra_planning_by_tutor:
+        planningOverrides && planningOverrides.length > 0
+          ? planningOverrides
+          : undefined,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
       pending_package: student.pending_package,
@@ -324,6 +331,12 @@ export class StudentsService {
     const remove: string[] = [];
     if (this.isScheduleCleared(student)) remove.push('schedule');
     if (this.isMakeupBatchesCleared(student)) remove.push('make_up_batches');
+    if (
+      Array.isArray(student.extra_planning_by_tutor) &&
+      student.extra_planning_by_tutor.length === 0
+    ) {
+      remove.push('extra_planning_by_tutor');
+    }
     if (this.isPendingCleared(student)) {
       // '' is a string, so it survives the null/undefined strip — the pending
       // keys must leave $SET too (DynamoDB rejects overlapping SET/REMOVE
