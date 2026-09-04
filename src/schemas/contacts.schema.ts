@@ -42,6 +42,8 @@ export const ContactsSchema = new dynamoose.Schema({
   title: String,
   currently_accepting_students: Boolean,
   is_tutor: Boolean,
+  // Excluded from the contacts table's "copy all emails" bulk-email list.
+  exclude_bulk_email: Boolean,
   // Deprecated: replaced by structured `availability` below. Kept so reads of
   // pre-existing records with free-text availability don't error.
   tutoring_availability: String,

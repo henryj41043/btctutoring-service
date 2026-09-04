@@ -55,7 +55,7 @@ export class ContactsService {
           new ScanCommand({
             TableName: 'BTCTutoring-Contacts-Table',
             ProjectionExpression:
-              '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst',
+              '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe',
             ExpressionAttributeNames: {
               '#id': 'id',
               '#fn': 'first_name',
@@ -68,6 +68,8 @@ export class ContactsService {
               // Scholarship flag + state feed the contacts-table filter.
               '#ss': 'scholarship_student',
               '#sst': 'scholarship_state',
+              // Feeds the contacts table's copy-all-emails exclusion.
+              '#ebe': 'exclude_bulk_email',
             },
             ExclusiveStartKey: lastKey,
           }),
@@ -165,6 +167,7 @@ export class ContactsService {
       title: contact.title,
       currently_accepting_students: contact.currently_accepting_students,
       is_tutor: contact.is_tutor,
+      exclude_bulk_email: contact.exclude_bulk_email,
       availability: contact.availability?.map((block) => ({
         days: block.days,
         start_time: block.start_time,
@@ -257,6 +260,7 @@ export class ContactsService {
         title: contact.title,
         currently_accepting_students: contact.currently_accepting_students,
         is_tutor: contact.is_tutor,
+        exclude_bulk_email: contact.exclude_bulk_email,
         availability: contact.availability?.map((block) => ({
           days: block.days,
           start_time: block.start_time,
