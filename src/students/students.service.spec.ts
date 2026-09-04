@@ -503,6 +503,38 @@ describe('StudentsService', () => {
       expect(upd).not.toHaveProperty('custom_session_length_min');
     });
 
+    it('persists per-tutor planning overrides, filters malformed entries, clears on []', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          extra_planning_by_tutor: [
+            null,
+            {tutor_id: 't-1', minutes: 15},
+          ] as never,
+        }),
+      );
+      let upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd['extra_planning_by_tutor']).toEqual([
+        {tutor_id: 't-1', minutes: 15},
+      ]);
+
+      await service.updateStudent(
+        sampleStudent({ extra_planning_by_tutor: [] }),
+      );
+      const cleared = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(cleared.$REMOVE).toContain('extra_planning_by_tutor');
+      expect(cleared.$SET).not.toHaveProperty('extra_planning_by_tutor');
+
+      // Absent field: neither written nor removed (stored overrides survive).
+      await service.updateStudent(sampleStudent());
+      upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
+      expect(upd).not.toHaveProperty('extra_planning_by_tutor');
+      expect(upd).not.toHaveProperty('$REMOVE');
+    });
+
     it('issues a $REMOVE to clear an explicitly emptied schedule', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ schedule: [] }));
