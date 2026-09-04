@@ -87,7 +87,7 @@ describe('ContactsService', () => {
       };
       expect(cmd.input.TableName).toBe('BTCTutoring-Contacts-Table');
       expect(cmd.input.ProjectionExpression).toBe(
-        '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst',
+        '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe',
       );
       expect(cmd.input.ExpressionAttributeNames).toEqual({
         '#id': 'id',
@@ -100,6 +100,7 @@ describe('ContactsService', () => {
         '#st': 'status',
         '#ss': 'scholarship_student',
         '#sst': 'scholarship_state',
+        '#ebe': 'exclude_bulk_email',
       });
       expect(cmd.input.ExclusiveStartKey).toBeUndefined();
     });
@@ -268,6 +269,7 @@ describe('ContactsService', () => {
 
       const result = await service.updateContact(
         sampleContact({
+          exclude_bulk_email: true,
           availability: [
             { days: ['Tue'], start_time: '11:00', end_time: '12:00' },
           ],
@@ -279,6 +281,7 @@ describe('ContactsService', () => {
         expect.objectContaining({
           first_name: 'Ada',
           sibling_discount: 10,
+          exclude_bulk_email: true,
           availability: [
             { days: ['Tue'], start_time: '11:00', end_time: '12:00' },
           ],
