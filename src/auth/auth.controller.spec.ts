@@ -31,6 +31,7 @@ describe('AuthController', () => {
       signup: jest.fn(),
       confirm: jest.fn(),
       login: jest.fn(),
+      refresh: jest.fn(),
       respondToNewPasswordChallenge: jest.fn(),
       changePassword: jest.fn(),
       forgotPassword: jest.fn(),
@@ -68,6 +69,11 @@ describe('AuthController', () => {
   it('login delegates to the service', async () => {
     await controller.login({ email: 'a@b.com', password: 'p' });
     expect(service.login).toHaveBeenCalledWith('a@b.com', 'p');
+  });
+
+  it('refresh delegates to the service', async () => {
+    await controller.refresh({ username: 'cognito-user', refreshToken: 'rt-1' });
+    expect(service.refresh).toHaveBeenCalledWith('cognito-user', 'rt-1');
   });
 
   it('completeNewPassword delegates to the service', async () => {

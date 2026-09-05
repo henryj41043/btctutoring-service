@@ -105,6 +105,34 @@ describe('AuthService', () => {
     });
   });
 
+  describe('refresh', () => {
+    it('exchanges the refresh token via REFRESH_TOKEN_AUTH with the username secret hash', async () => {
+      const auth: AuthenticationResultType = { AccessToken: 'fresh', IdToken: 'fresh-id' };
+      cognitoMock
+        .on(InitiateAuthCommand)
+        .resolves({ AuthenticationResult: auth });
+      await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual(auth);
+      const call = cognitoMock.commandCalls(InitiateAuthCommand)[0];
+      expect(call.args[0].input.AuthFlow).toBe('REFRESH_TOKEN_AUTH');
+      expect(call.args[0].input.AuthParameters?.['REFRESH_TOKEN']).toBe('rt-1');
+      expect(call.args[0].input.AuthParameters?.['SECRET_HASH']).toBeTruthy();
+    });
+
+    it('returns a failure message when Cognito returns no result', async () => {
+      cognitoMock.on(InitiateAuthCommand).resolves({});
+      await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual({
+        message: 'Refresh failed.',
+      });
+    });
+
+    it('returns a failure message on error (expired/revoked refresh token)', async () => {
+      cognitoMock.on(InitiateAuthCommand).rejects(new Error('NotAuthorizedException'));
+      await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual({
+        message: 'Refresh failed.',
+      });
+    });
+  });
+
   describe('respondToNewPasswordChallenge', () => {
     it('returns the authentication result', async () => {
       const auth: AuthenticationResultType = { AccessToken: 'token' };

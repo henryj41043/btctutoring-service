@@ -115,6 +115,37 @@ export class AuthService {
     }
   }
 
+  /**
+   * Exchanges a refresh token for fresh access/id tokens. Cognito's
+   * access/id tokens live 60 minutes; without this the app bounced users to
+   * the login page an hour into every workday. The refresh token itself is
+   * not rotated (5-day validity), so the response carries no new one.
+   */
+  async refresh(
+    username: string,
+    refreshToken: string,
+  ): Promise<ResponseDto | AuthenticationResultType> {
+    const command = new InitiateAuthCommand({
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: this.clientId,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken,
+        SECRET_HASH: this.getSecretHash(username),
+      },
+    });
+    try {
+      const response: InitiateAuthCommandOutput =
+        await this.client.send(command);
+      if (!response.AuthenticationResult) {
+        return { message: 'Refresh failed.' } as ResponseDto;
+      }
+      return response.AuthenticationResult;
+    } catch (error) {
+      Logger.error(error);
+      return { message: 'Refresh failed.' } as ResponseDto;
+    }
+  }
+
   async respondToNewPasswordChallenge(
     username: string,
     newPassword: string,

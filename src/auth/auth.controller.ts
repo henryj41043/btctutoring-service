@@ -15,6 +15,7 @@ import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { ConfirmDto } from './dto/confirm.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshDto } from './dto/refresh.dto';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
@@ -55,6 +56,13 @@ export class AuthController {
     @Body() dto: LoginDto,
   ): Promise<ResponseDto | AuthenticationResultType> {
     return this.authService.login(dto.email, dto.password);
+  }
+
+  @Post('refresh')
+  refresh(
+    @Body() dto: RefreshDto,
+  ): Promise<ResponseDto | AuthenticationResultType> {
+    return this.authService.refresh(dto.username, dto.refreshToken);
   }
 
   @Post('complete-new-password')
