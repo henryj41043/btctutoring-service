@@ -5,7 +5,6 @@ import { SessionsService } from './sessions.service';
 import { TeamsService } from '../teams/teams.service';
 import { User } from '../models/user.model';
 import { Session, SessionType } from '../models/session.model';
-import { Team } from '../models/team.model';
 
 const admin: User = {
   username: 'admin',
@@ -69,7 +68,7 @@ describe('SessionsController', () => {
       deleteSession: jest.fn(),
     };
     const teamsServiceMock: Partial<jest.Mocked<TeamsService>> = {
-      getTeamByLead: jest.fn(),
+      resolveTeamTutorIds: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SessionsController],
@@ -202,21 +201,13 @@ describe('SessionsController', () => {
       await expect(
         controller.getSessions(reqAs(tutor), '', '', '', '', ''),
       ).rejects.toThrow('Unauthorized');
-      expect(teamsService.getTeamByLead).not.toHaveBeenCalled();
+      expect(teamsService.resolveTeamTutorIds).not.toHaveBeenCalled();
     });
   });
 
   describe('lead tutor team visibility', () => {
-    const teamOf = (members: string[]): Team =>
-      ({
-        id: 'team-1',
-        name: 'Team A',
-        lead_contact_id: 'c-lead',
-        member_contact_ids: members,
-      }) as Team;
-
     it('lead + no params -> team sessions in one call, lead included', async () => {
-      teamsService.getTeamByLead.mockResolvedValue(teamOf(['c-m1', 'c-m2']));
+      teamsService.resolveTeamTutorIds.mockResolvedValue(['c-m1', 'c-m2']);
       await controller.getSessions(
         reqAs(lead),
         '',
@@ -225,15 +216,28 @@ describe('SessionsController', () => {
         '2026-01-01',
         '2026-02-01',
       );
-      expect(teamsService.getTeamByLead).toHaveBeenCalledWith('c-lead');
+      expect(teamsService.resolveTeamTutorIds).toHaveBeenCalledWith('c-lead');
       expect(service.getSessionsByTutors).toHaveBeenCalledWith(
         ['c-lead', 'c-m1', 'c-m2'],
         { from: '2026-01-01', to: '2026-02-01' },
       );
     });
 
-    it('dedupes a lead mistakenly listed among the members', async () => {
-      teamsService.getTeamByLead.mockResolvedValue(teamOf(['c-lead', 'c-m1']));
+    it('nested teams: the resolver may return another lead and their members', async () => {
+      teamsService.resolveTeamTutorIds.mockResolvedValue([
+        'c-emily',
+        'c-m1',
+        'c-m2',
+      ]);
+      await controller.getSessions(reqAs(lead), '', '', '', '', '');
+      expect(service.getSessionsByTutors).toHaveBeenCalledWith(
+        ['c-lead', 'c-emily', 'c-m1', 'c-m2'],
+        undefined,
+      );
+    });
+
+    it('dedupes a lead mistakenly returned among the members', async () => {
+      teamsService.resolveTeamTutorIds.mockResolvedValue(['c-lead', 'c-m1']);
       await controller.getSessions(reqAs(lead), '', '', '', '', '');
       expect(service.getSessionsByTutors).toHaveBeenCalledWith(
         ['c-lead', 'c-m1'],
@@ -241,21 +245,8 @@ describe('SessionsController', () => {
       );
     });
 
-    it('tolerates a team with no member list', async () => {
-      teamsService.getTeamByLead.mockResolvedValue({
-        id: 'team-1',
-        name: 'Team A',
-        lead_contact_id: 'c-lead',
-      } as Team);
-      await controller.getSessions(reqAs(lead), '', '', '', '', '');
-      expect(service.getSessionsByTutors).toHaveBeenCalledWith(
-        ['c-lead'],
-        undefined,
-      );
-    });
-
-    it('lead with no team degrades to their own sessions', async () => {
-      teamsService.getTeamByLead.mockResolvedValue(undefined);
+    it('lead with no team (or an empty one) degrades to their own sessions', async () => {
+      teamsService.resolveTeamTutorIds.mockResolvedValue([]);
       await controller.getSessions(reqAs(lead), '', '', '', '2026-01-01', '');
       expect(service.getSessionsByTutor).toHaveBeenCalledWith('c-lead', {
         from: '2026-01-01',

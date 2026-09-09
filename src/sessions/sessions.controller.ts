@@ -71,17 +71,19 @@ export class SessionsController {
       }
       if (isLeadTutor(groups)) {
         // Lead Tutors: the parameterless GET returns the whole team's
-        // sessions. The team is resolved server-side so the client never
-        // asserts membership. The lead is included via user.contact (not the
-        // record's lead id) so a mis-pointed team can't widen access.
-        const team = await this.teamsService.getTeamByLead(user.contact);
-        if (!team) {
-          // No team yet — degrade to plain-tutor behavior (own sessions).
+        // sessions — transitively, since a member who leads a team of their
+        // own brings that team along (nested teams). Resolved server-side so
+        // the client never asserts membership. The lead is included via
+        // user.contact (not the record's lead id) so a mis-pointed team can't
+        // widen access.
+        const members = await this.teamsService.resolveTeamTutorIds(
+          user.contact,
+        );
+        if (members.length === 0) {
+          // No team (or an empty one) — degrade to plain-tutor behavior.
           return this.sessionsService.getSessionsByTutor(user.contact, range);
         }
-        const ids = [
-          ...new Set([user.contact, ...(team.member_contact_ids ?? [])]),
-        ];
+        const ids = [...new Set([user.contact, ...members])];
         return this.sessionsService.getSessionsByTutors(ids, range);
       }
     }
