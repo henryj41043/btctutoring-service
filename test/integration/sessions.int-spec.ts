@@ -107,14 +107,22 @@ describe('Sessions (integration)', () => {
     expect(Model.update).not.toHaveBeenCalled();
   });
 
-  it('a lead with a team gets the whole team sessions on the parameterless GET', async () => {
+  it('a lead with a (nested) team gets the whole team sessions on the parameterless GET', async () => {
     TeamModel.scan.mockClear();
+    // One full scan of the teams table resolves membership transitively:
+    // the lead's team lists another lead, whose own team comes along.
     scanResolves(TeamModel, [
       {
         id: 'team-1',
         name: 'Team A',
         lead_contact_id: 'contact-lead',
-        member_contact_ids: ['contact-tutor'],
+        member_contact_ids: ['contact-tutor', 'contact-sublead'],
+      },
+      {
+        id: 'team-2',
+        name: 'Team B',
+        lead_contact_id: 'contact-sublead',
+        member_contact_ids: ['contact-nested'],
       },
     ]);
     const chain = scanResolves(Model, [{ id: 's-1' }]);
@@ -122,11 +130,14 @@ describe('Sessions (integration)', () => {
       .get('/sessions')
       .set('x-test-role', 'lead');
     expect(res.status).toBe(200);
-    expect(TeamModel.scan).toHaveBeenCalledWith({
-      lead_contact_id: { eq: 'contact-lead' },
-    });
+    expect(TeamModel.scan).toHaveBeenCalledWith();
     expect(chain.where).toHaveBeenCalledWith('tutor_id');
-    expect(chain.in).toHaveBeenCalledWith(['contact-lead', 'contact-tutor']);
+    expect(chain.in).toHaveBeenCalledWith([
+      'contact-lead',
+      'contact-tutor',
+      'contact-sublead',
+      'contact-nested',
+    ]);
   });
 
   it('a lead with no team gets their own sessions on the parameterless GET', async () => {

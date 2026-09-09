@@ -91,9 +91,49 @@ export class TeamsService {
   }
 
   /**
-   * One-team-max invariant, enforced server-side (the app's picker disables
-   * already-assigned tutors, but two concurrent admins or a stale list could
-   * still double-assign without this check).
+   * Every tutor contact id a lead may see, resolved transitively: the lead's
+   * own team members, plus — for any member who heads a team of their own —
+   * that team's members, and so on (nested teams, client policy 2026-09: a
+   * Head Tutor's team lists a Lead, and thereby the Lead's whole team).
+   * Breadth-first over one scan of the teams table; a visited set makes it
+   * cycle-safe and dedupes. Never includes the lead themself (the caller
+   * adds user.contact so a mis-pointed record can't widen access). Returns
+   * [] when the lead heads no team.
+   */
+  async resolveTeamTutorIds(leadContactId: string): Promise<string[]> {
+    const teams = await this.getTeams();
+    const teamByLead = new Map<string, Team>();
+    for (const t of teams) {
+      if (t.lead_contact_id && !teamByLead.has(t.lead_contact_id)) {
+        teamByLead.set(t.lead_contact_id, t);
+      }
+    }
+    if (!teamByLead.has(leadContactId)) return [];
+    const seenLeads = new Set<string>([leadContactId]);
+    const tutors = new Set<string>();
+    const queue: string[] = [leadContactId];
+    // Bounded by the number of teams — each lead is expanded at most once.
+    while (queue.length > 0) {
+      const lead = queue.shift() as string;
+      for (const member of teamByLead.get(lead)?.member_contact_ids ?? []) {
+        if (!member || member === leadContactId) continue;
+        tutors.add(member);
+        if (teamByLead.has(member) && !seenLeads.has(member)) {
+          seenLeads.add(member);
+          queue.push(member);
+        }
+      }
+    }
+    return [...tutors];
+  }
+
+  /**
+   * Membership invariants, enforced server-side (two concurrent admins or a
+   * stale list could otherwise slip past the app's picker):
+   * - a lead is required and is never a member of their own team;
+   * - a lead heads AT MOST ONE team (getTeamByLead / the resolver key on it);
+   * - members may belong to several teams, and a lead may be a member of
+   *   another team (nested teams — that team's lead then sees theirs too).
    */
   private async assertMembershipAvailable(team: Team): Promise<void> {
     if (!team.lead_contact_id) {
@@ -104,18 +144,14 @@ export class TeamsService {
       throw new BadRequestException('The lead cannot also be a member.');
     }
     const teams = await this.getTeams();
-    const assigned = new Set<string>();
-    for (const other of teams) {
-      if (team.id && other.id === team.id) continue; // updating this team
-      if (other.lead_contact_id) assigned.add(other.lead_contact_id);
-      for (const id of other.member_contact_ids ?? []) assigned.add(id);
-    }
-    const conflicts = [team.lead_contact_id, ...members].filter((id) =>
-      assigned.has(id),
+    const headsAnother = teams.some(
+      (other) =>
+        !(team.id && other.id === team.id) && // updating this team
+        other.lead_contact_id === team.lead_contact_id,
     );
-    if (conflicts.length > 0) {
+    if (headsAnother) {
       throw new BadRequestException(
-        `Contact(s) already assigned to another team: ${conflicts.join(', ')}`,
+        `Contact already leads another team: ${team.lead_contact_id}`,
       );
     }
   }

@@ -146,7 +146,94 @@ describe('TeamsService', () => {
     });
   });
 
-  describe('one-team-max validation', () => {
+  describe('resolveTeamTutorIds (nested teams)', () => {
+    const jenna = team({
+      id: 't-jenna',
+      lead_contact_id: 'c-jenna',
+      member_contact_ids: ['c-emily', 'c-solo'],
+    });
+    const emily = team({
+      id: 't-emily',
+      lead_contact_id: 'c-emily',
+      member_contact_ids: ['c-m1', 'c-m2'],
+    });
+
+    it("returns the lead's members plus, transitively, the members of any member who leads a team", async () => {
+      scanResolves(Model, [emily, jenna]);
+      await expect(service.resolveTeamTutorIds('c-jenna')).resolves.toEqual([
+        'c-emily',
+        'c-solo',
+        'c-m1',
+        'c-m2',
+      ]);
+      // Emily's own read stays her team only — nesting flows downward.
+      await expect(service.resolveTeamTutorIds('c-emily')).resolves.toEqual([
+        'c-m1',
+        'c-m2',
+      ]);
+    });
+
+    it('is cycle-safe and dedupes (A lists B, B lists A and a shared tutor)', async () => {
+      scanResolves(Model, [
+        team({
+          id: 'a',
+          lead_contact_id: 'c-a',
+          member_contact_ids: ['c-b', 'c-shared'],
+        }),
+        team({
+          id: 'b',
+          lead_contact_id: 'c-b',
+          member_contact_ids: ['c-a', 'c-shared', 'c-m1'],
+        }),
+      ]);
+      await expect(service.resolveTeamTutorIds('c-a')).resolves.toEqual([
+        'c-b',
+        'c-shared',
+        'c-m1',
+      ]);
+    });
+
+    it('never includes the lead themself, even when mis-listed as a member', async () => {
+      scanResolves(Model, [team({ member_contact_ids: ['c-lead', 'c-m1'] })]);
+      await expect(service.resolveTeamTutorIds('c-lead')).resolves.toEqual([
+        'c-m1',
+      ]);
+    });
+
+    it('returns [] when the lead heads no team, or an empty one', async () => {
+      scanResolves(Model, [emily]);
+      await expect(service.resolveTeamTutorIds('c-nobody')).resolves.toEqual(
+        [],
+      );
+      scanResolves(Model, [
+        team({ member_contact_ids: undefined as unknown as string[] }),
+      ]);
+      await expect(service.resolveTeamTutorIds('c-lead')).resolves.toEqual([]);
+    });
+
+    it('ignores records with no lead and blank member ids', async () => {
+      scanResolves(Model, [
+        team({
+          id: 'x',
+          lead_contact_id: undefined,
+          member_contact_ids: ['c-ghost'],
+        }),
+        team({ member_contact_ids: ['', 'c-m1'] }),
+      ]);
+      await expect(service.resolveTeamTutorIds('c-lead')).resolves.toEqual([
+        'c-m1',
+      ]);
+    });
+
+    it('rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.resolveTeamTutorIds('c-lead')).rejects.toThrow(
+        'scan boom',
+      );
+    });
+  });
+
+  describe('membership validation', () => {
     it('rejects a team without a lead', async () => {
       await expect(
         service.createTeam(team({ id: undefined, lead_contact_id: '' })),
@@ -162,39 +249,40 @@ describe('TeamsService', () => {
       ).rejects.toThrow('The lead cannot also be a member.');
     });
 
-    it('rejects when the lead already heads another team', async () => {
+    it('rejects when the lead already heads another team (a lead heads at most one)', async () => {
       scanResolves(Model, [team({ id: 'other-team' })]);
       await expect(
         service.createTeam(team({ id: undefined, member_contact_ids: [] })),
-      ).rejects.toThrow('Contact(s) already assigned to another team: c-lead');
+      ).rejects.toThrow('Contact already leads another team: c-lead');
+      expect(Model.__save).not.toHaveBeenCalled();
     });
 
-    it('rejects when a member belongs to another team, naming the id', async () => {
+    it('allows a member who already belongs to another team (multi-team membership)', async () => {
       scanResolves(Model, [
         team({ id: 'other-team', lead_contact_id: 'c-other-lead' }),
       ]);
-      await expect(
-        service.createTeam(
-          team({
-            id: undefined,
-            lead_contact_id: 'c-new-lead',
-            member_contact_ids: ['c-m2', 'c-free'],
-          }),
-        ),
-      ).rejects.toThrow('Contact(s) already assigned to another team: c-m2');
+      Model.__save.mockResolvedValue(undefined);
+      const result = await service.createTeam(
+        team({
+          id: undefined,
+          lead_contact_id: 'c-new-lead',
+          member_contact_ids: ['c-m2', 'c-free'],
+        }),
+      );
+      expect(result.message).toBe('Team created successfully.');
     });
 
-    it('rejects when a member is another team lead', async () => {
+    it("allows another team's lead as a member (nested teams)", async () => {
       scanResolves(Model, [team({ id: 'other-team', member_contact_ids: [] })]);
-      await expect(
-        service.createTeam(
-          team({
-            id: undefined,
-            lead_contact_id: 'c-new-lead',
-            member_contact_ids: ['c-lead'],
-          }),
-        ),
-      ).rejects.toThrow('Contact(s) already assigned to another team: c-lead');
+      Model.__save.mockResolvedValue(undefined);
+      const result = await service.createTeam(
+        team({
+          id: undefined,
+          lead_contact_id: 'c-new-lead',
+          member_contact_ids: ['c-lead'],
+        }),
+      );
+      expect(result.message).toBe('Team created successfully.');
     });
 
     it('ignores the team being updated when checking conflicts', async () => {

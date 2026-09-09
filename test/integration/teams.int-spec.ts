@@ -52,13 +52,35 @@ describe('Teams (integration)', () => {
     expect(res.body.message).toBe('Team created successfully.');
   });
 
-  it('rejects double-assignment with a 400 naming the contact', async () => {
+  it('allows a member who is already on another team (nested/multi-team membership)', async () => {
     scanResolves(Model, [
       {
         id: 'other-team',
         name: 'Team B',
         lead_contact_id: 'contact-other',
         member_contact_ids: ['contact-tutor'],
+      },
+    ]);
+    Model.__save.mockResolvedValue(undefined);
+    const res = await request(server())
+      .post('/teams')
+      .set('x-test-role', 'admin')
+      .send({
+        name: 'Team A',
+        lead_contact_id: 'contact-lead',
+        // A tutor on Team B, and Team B's lead — both fine as members.
+        member_contact_ids: ['contact-tutor', 'contact-other'],
+      });
+    expect(res.status).toBe(201);
+  });
+
+  it('rejects a lead who already heads another team with a 400 naming them', async () => {
+    scanResolves(Model, [
+      {
+        id: 'other-team',
+        name: 'Team B',
+        lead_contact_id: 'contact-lead',
+        member_contact_ids: [],
       },
     ]);
     const res = await request(server())
@@ -71,7 +93,7 @@ describe('Teams (integration)', () => {
       });
     expect(res.status).toBe(400);
     expect(res.body.message).toBe(
-      'Contact(s) already assigned to another team: contact-tutor',
+      'Contact already leads another team: contact-lead',
     );
   });
 
