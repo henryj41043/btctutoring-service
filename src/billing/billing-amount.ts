@@ -5,7 +5,11 @@ import {
   resolvePackageDef,
   round2,
 } from './package-config';
-import { countRemainingSlots, proratedFirstMonthCost } from './proration';
+import {
+  countRemainingSlots,
+  proratedFirstMonthCost,
+  startMissesNoSlots,
+} from './proration';
 
 /** A month key 'YYYY-MM' (month is 0-indexed) — the mid-month-change tag format. */
 export function monthKey(year: number, month: number): string {
@@ -51,6 +55,9 @@ function baseMonthlyCharge(
     // the full monthly cost rather than silently billing $0.
     const schedule = student.schedule ?? [];
     if (schedule.length === 0) return def.monthlyCost;
+    // A start that misses none of the month's sessions (on or before the first
+    // scheduled slot) is a full month, not a per-session proration.
+    if (startMissesNoSlots(schedule, start)) return def.monthlyCost;
     return proratedFirstMonthCost(def, countRemainingSlots(schedule, start));
   }
   return def.monthlyCost;

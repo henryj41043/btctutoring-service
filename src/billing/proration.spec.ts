@@ -2,6 +2,7 @@ import {
   countRemainingSlots,
   proratedFirstMonthCost,
   semiMonthlySplit,
+  startMissesNoSlots,
 } from './proration';
 import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 import { ScheduleSlot } from '../models/student.model';
@@ -52,5 +53,17 @@ describe('proration (service)', () => {
     expect(semiMonthlySplit(278.46)).toEqual([139.23, 139.23]);
     const [a, b] = semiMonthlySplit(181.01);
     expect(a + b).toBeCloseTo(181.01, 2);
+  });
+
+  it('startMissesNoSlots: true on/before the first scheduled slot, false after', () => {
+    // September 2026: Thursdays 3, 10, 17, 24; Tuesdays 1, 8, 15, 22, 29.
+    const thursday = [slot('THURSDAY')];
+    expect(startMissesNoSlots(thursday, new Date(2026, 8, 1))).toBe(true);
+    expect(startMissesNoSlots(thursday, new Date(2026, 8, 3))).toBe(true);
+    expect(startMissesNoSlots(thursday, new Date(2026, 8, 4))).toBe(false);
+    // Multi-slot week: a start on the 2nd already missed Tuesday the 1st.
+    const tueThu = [slot('TUESDAY'), slot('THURSDAY')];
+    expect(startMissesNoSlots(tueThu, new Date(2026, 8, 1))).toBe(true);
+    expect(startMissesNoSlots(tueThu, new Date(2026, 8, 2))).toBe(false);
   });
 });
