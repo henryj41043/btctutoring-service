@@ -102,6 +102,51 @@ describe('studentMonthlyCharge (service)', () => {
     ).toBe(362);
   });
 
+  it('charges the full month when the start misses no scheduled session (client policy)', () => {
+    // Excel $273, Thursdays. September 2026 Thursdays: 3, 10, 17, 24. A start
+    // on (or before) the first Thursday receives every session → full month.
+    const excel = (start: string): Student =>
+      ({
+        package: 'Excel',
+        package_start_date: start,
+        schedule: [
+          { weekday: 'THURSDAY', start_time: '15:00', end_time: '15:45' },
+        ],
+      }) as Student;
+    expect(
+      studentMonthlyCharge(excel('2026-09-03T00:00:00'), 2026, 8, TEST_CATALOG),
+    ).toBe(273);
+    expect(
+      studentMonthlyCharge(excel('2026-09-02T00:00:00'), 2026, 8, TEST_CATALOG),
+    ).toBe(273);
+  });
+
+  it('still prorates a start after the first scheduled session', () => {
+    // Start Sept 4 → Thursdays 10, 17, 24 remain → 3 × $63 (273*12/52) = $189.
+    const student = {
+      package: 'Excel',
+      package_start_date: '2026-09-04T00:00:00',
+      schedule: [
+        { weekday: 'THURSDAY', start_time: '15:00', end_time: '15:45' },
+      ],
+    } as Student;
+    expect(studentMonthlyCharge(student, 2026, 8, TEST_CATALOG)).toBe(189);
+  });
+
+  it('prorates a first-week start that missed one of a multi-slot week', () => {
+    // Succeed (2/wk, $41.77/session), Tue/Thu. Sept 2026: Tue 1,8,15,22,29;
+    // Thu 3,10,17,24. Starting Wed Sept 2 missed Tuesday the 1st → 8 slots
+    // remain → 334.16 (not the full $362).
+    const student = succeed({
+      package_start_date: '2026-09-02T00:00:00',
+      schedule: [
+        { weekday: 'TUESDAY', start_time: '10:00', end_time: '10:30' },
+        { weekday: 'THURSDAY', start_time: '10:00', end_time: '10:30' },
+      ] as Student['schedule'],
+    });
+    expect(studentMonthlyCharge(student, 2026, 8, TEST_CATALOG)).toBe(334.16);
+  });
+
   it('adds the old package portion in a mid-month package-change month', () => {
     // New package prorates from Jul 15 (3 Wednesdays → 276.93, as above) and the
     // stored old-package portion ($120) is added on top — but only for 2026-07.
