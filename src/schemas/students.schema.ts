@@ -83,6 +83,9 @@ export const StudentsSchema = new dynamoose.Schema({
   pending_custom_session_length_min: Number,
   // 'YYYY-MM-DD', always the 1st of a month.
   pending_package_effective: String,
+  // The effective date the 14-day advance-notice email was sent for (cron
+  // idempotency); cleared with the other pending fields.
+  pending_change_notice_sent: String,
   // The new package's weekly slots, swapped in at promotion.
   pending_schedule: {
     type: Array,

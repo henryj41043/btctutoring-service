@@ -19,6 +19,7 @@ const PENDING_FIELDS = [
   'pending_custom_session_length_min',
   'pending_package_effective',
   'pending_schedule',
+  'pending_change_notice_sent',
 ] as const;
 
 @Injectable()
@@ -41,7 +42,9 @@ export class StudentsService {
       ? student.make_up_batches.filter((b) => b && typeof b === 'object')
       : undefined;
     const planningOverrides = Array.isArray(student.extra_planning_by_tutor)
-      ? student.extra_planning_by_tutor.filter((o) => o && typeof o === 'object')
+      ? student.extra_planning_by_tutor.filter(
+          (o) => o && typeof o === 'object',
+        )
       : undefined;
 
     const candidate: Record<string, unknown> = {
@@ -411,6 +414,24 @@ export class StudentsService {
    * 1st-of-month cron; a direct model update because buildStudentAttributes
    * has no scalar-$REMOVE path.
    */
+  /**
+   * Stamps the effective date the advance-notice email went out for, so the
+   * daily cron never notifies twice for the same scheduled change. Cron-only
+   * (not part of the admin update payload); cleared with the pending fields.
+   */
+  async markPendingChangeNoticeSent(
+    id: string,
+    effective: string,
+  ): Promise<void> {
+    await StudentsModel.update(
+      { id },
+      { pending_change_notice_sent: effective },
+    ).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    });
+  }
+
   async promotePendingPackage(student: Student): Promise<void> {
     const isCustom = student.pending_package === CUSTOM_PACKAGE;
     const sets: Record<string, unknown> = {
