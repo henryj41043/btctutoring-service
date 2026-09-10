@@ -509,13 +509,13 @@ describe('StudentsService', () => {
         sampleStudent({
           extra_planning_by_tutor: [
             null,
-            {tutor_id: 't-1', minutes: 15},
+            { tutor_id: 't-1', minutes: 15 },
           ] as never,
         }),
       );
       let upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
       expect(upd['extra_planning_by_tutor']).toEqual([
-        {tutor_id: 't-1', minutes: 15},
+        { tutor_id: 't-1', minutes: 15 },
       ]);
 
       await service.updateStudent(
@@ -600,6 +600,7 @@ describe('StudentsService', () => {
         'pending_custom_session_length_min',
         'pending_package_effective',
         'pending_schedule',
+        'pending_change_notice_sent',
       ]);
       // DynamoDB rejects overlapping SET/REMOVE paths — none may remain.
       for (const field of update.$REMOVE) {
@@ -704,6 +705,24 @@ describe('StudentsService', () => {
     });
   });
 
+  describe('markPendingChangeNoticeSent', () => {
+    it('stamps the effective date the notice was sent for (cron idempotency)', async () => {
+      Model.update.mockResolvedValue(undefined);
+      await service.markPendingChangeNoticeSent('s-1', '2026-10-01');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 's-1' },
+        { pending_change_notice_sent: '2026-10-01' },
+      );
+    });
+
+    it('rejects when the write fails', async () => {
+      Model.update.mockRejectedValue(new Error('write boom'));
+      await expect(
+        service.markPendingChangeNoticeSent('s-1', '2026-10-01'),
+      ).rejects.toThrow('write boom');
+    });
+  });
+
   describe('promotePendingPackage', () => {
     const pendingStudent = (overrides: Partial<Student> = {}): Student =>
       sampleStudent({
@@ -739,6 +758,7 @@ describe('StudentsService', () => {
         'pending_custom_session_length_min',
         'pending_package_effective',
         'pending_schedule',
+        'pending_change_notice_sent',
         'custom_monthly_cost',
         'custom_sessions_per_week',
         'custom_session_length_min',

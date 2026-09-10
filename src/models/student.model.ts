@@ -41,7 +41,7 @@ export class Student {
   /** Extra tutor planning minutes credited per counted session (payroll). */
   extra_planning_minutes?: number;
   /** Per-tutor overrides of extra_planning_minutes ([] on save = clear all). */
-  extra_planning_by_tutor?: {tutor_id: string; minutes: number}[];
+  extra_planning_by_tutor?: { tutor_id: string; minutes: number }[];
   /** Old package's prorated portion for a mid-month package change month. */
   mid_month_prior_charge?: number;
   /**
@@ -54,6 +54,8 @@ export class Student {
   pending_custom_session_length_min?: number;
   /** 'YYYY-MM-DD', always the 1st of a month. */
   pending_package_effective?: string;
+  /** The pending_package_effective the advance-notice email was sent for (cron idempotency). */
+  pending_change_notice_sent?: string;
   /** The new package's weekly slots, swapped in at promotion. */
   pending_schedule?: ScheduleSlot[];
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
