@@ -1,6 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { BillingModel } from '../models/billing.model';
-import { BillingRecord } from '../models/billing-record.model';
+import {
+  AmountOverrideRequest,
+  BillingRecord,
+} from '../models/billing-record.model';
 
 @Injectable()
 export class BillingService {
@@ -127,7 +130,7 @@ export class BillingService {
    */
   async upsertBillingRecord(record: BillingRecord) {
     const id = BillingService.recordId(record.contact_id, record.period_start);
-    const model = new BillingModel({
+    const attributes: Record<string, unknown> = {
       id,
       contact_id: record.contact_id,
       period_start: record.period_start,
@@ -136,7 +139,17 @@ export class BillingService {
       paid: record.paid,
       paid_date: record.paid_date,
       invoice_number: record.invoice_number,
-    });
+      // A PutItem replaces the whole item, so callers must carry the
+      // override they loaded (the Billing page does); a missing/null value
+      // is stripped rather than written as null (dynamoose rejects null).
+      amount_override: record.amount_override,
+    };
+    for (const key of Object.keys(attributes)) {
+      if (attributes[key] === undefined || attributes[key] === null) {
+        delete attributes[key];
+      }
+    }
+    const model = new BillingModel(attributes);
     return model
       .save()
       .then(() => Promise.resolve({ id, message: 'Billing record saved.' }))
@@ -144,5 +157,77 @@ export class BillingService {
         Logger.error(error.message, error);
         return Promise.reject(error);
       });
+  }
+
+  /**
+   * Sets or clears an admin's per-period amount override (client request
+   * 2026-09: "No charge" = 0, or a custom amount). Touches ONLY the override
+   * on an existing record — paid state, paid date and the derived snapshot
+   * stay as they are — and creates a minimal unpaid record when none exists
+   * yet (an override may be set before any paid toggle or cron run). Clearing
+   * a never-recorded period is a no-op.
+   */
+  async setAmountOverride(
+    request: AmountOverrideRequest,
+  ): Promise<{ id: string; message: string }> {
+    const override = request.amount_override;
+    if (
+      override !== null &&
+      (typeof override !== 'number' ||
+        !Number.isFinite(override) ||
+        override < 0)
+    ) {
+      throw new BadRequestException(
+        'amount_override must be a non-negative number, or null to clear.',
+      );
+    }
+    if (!request.contact_id || !request.period_start) {
+      throw new BadRequestException(
+        'contact_id and period_start are required.',
+      );
+    }
+    const id = BillingService.recordId(
+      request.contact_id,
+      request.period_start,
+    );
+    const existing = (await BillingModel.get(id).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    })) as unknown as BillingRecord | undefined;
+
+    if (!existing) {
+      if (override === null) {
+        return { id, message: 'No billing record to clear.' };
+      }
+      await BillingModel.create({
+        id,
+        contact_id: request.contact_id,
+        period_start: request.period_start,
+        cycle: request.cycle,
+        amount: override,
+        paid: false,
+        amount_override: override,
+      }).catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+      return { id, message: 'Billing override saved.' };
+    }
+
+    const update =
+      override === null
+        ? { $REMOVE: ['amount_override'] }
+        : { $SET: { amount_override: override } };
+    await BillingModel.update({ id }, update).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    });
+    return {
+      id,
+      message:
+        override === null
+          ? 'Billing override cleared.'
+          : 'Billing override saved.',
+    };
   }
 }
