@@ -32,6 +32,7 @@ describe('BillingController', () => {
       getBillingRecordsByPeriod: jest.fn(),
       getBillingRecordsByMonth: jest.fn(),
       upsertBillingRecord: jest.fn(),
+      setAmountOverride: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [BillingController],
@@ -108,6 +109,36 @@ describe('BillingController', () => {
       await expect(
         controller.upsertBillingRecord(reqAs(tutor), record),
       ).rejects.toThrow('Unauthorized');
+    });
+  });
+
+  describe('setAmountOverride', () => {
+    const request = {
+      contact_id: 'c-1',
+      period_start: '2026-07-01',
+      cycle: 'monthly',
+      amount_override: 0,
+    };
+
+    it('admin sets an override', async () => {
+      service.setAmountOverride.mockResolvedValue({
+        id: 'c-1#2026-07-01',
+        message: 'ok',
+      });
+      await expect(
+        controller.setAmountOverride(reqAs(admin), request),
+      ).resolves.toEqual({
+        id: 'c-1#2026-07-01',
+        message: 'ok',
+      });
+      expect(service.setAmountOverride).toHaveBeenCalledWith(request);
+    });
+
+    it('non-admin is rejected', async () => {
+      await expect(
+        controller.setAmountOverride(reqAs(tutor), request),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.setAmountOverride).not.toHaveBeenCalled();
     });
   });
 });

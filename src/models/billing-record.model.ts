@@ -15,4 +15,14 @@ export class BillingRecord {
   paid: boolean;
   paid_date?: string;
   invoice_number?: string;
+  /** Admin override of the derived amount for this period (0 = no charge); absent = derived. */
+  amount_override?: number;
+}
+
+/** PUT /billing/override payload: null clears the override. */
+export class AmountOverrideRequest {
+  contact_id: string;
+  period_start: string;
+  cycle: string;
+  amount_override: number | null;
 }

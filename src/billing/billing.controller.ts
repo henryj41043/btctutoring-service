@@ -5,6 +5,7 @@ import {
   Get,
   Logger,
   Post,
+  Put,
   Query,
   Request,
   UseGuards,
@@ -13,7 +14,10 @@ import { BillingService } from './billing.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
-import { BillingRecord } from '../models/billing-record.model';
+import {
+  AmountOverrideRequest,
+  BillingRecord,
+} from '../models/billing-record.model';
 
 @Controller('billing')
 export class BillingController {
@@ -56,5 +60,16 @@ export class BillingController {
   ) {
     this.assertAdmin(req);
     return this.billingService.upsertBillingRecord(record);
+  }
+
+  /** Sets (number, 0 = no charge) or clears (null) a period's amount override. */
+  @Put('override')
+  @UseGuards(AuthGuard('jwt'))
+  async setAmountOverride(
+    @Request() req: express.Request,
+    @Body() request: AmountOverrideRequest,
+  ) {
+    this.assertAdmin(req);
+    return this.billingService.setAmountOverride(request);
   }
 }
