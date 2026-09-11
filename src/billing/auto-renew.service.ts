@@ -23,6 +23,10 @@ import {
 } from './billing-amount';
 import { easternSlotToUtc, utcToEasternWall } from './eastern-time';
 import { STUDENT_STATUS } from '../students/student-status';
+import {
+  LEGACY_PENDING_FIELDS,
+  planPromotion,
+} from '../students/pending-changes';
 
 const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
 const PENDING = 'Pending';
@@ -114,14 +118,17 @@ export class AutoRenewService {
     const promotedOnTime: Student[] = [];
     const promotedContactIds = new Set<string>();
     for (const student of activeStudents) {
-      if (!student.pending_package || !student.pending_package_effective) {
-        continue;
-      }
-      if (student.pending_package_effective > monthStartKey) continue;
+      // Every due change (possibly several after a downed cron) is applied
+      // in one write; the last due one wins.
+      const plan = planPromotion(student, monthStartKey);
+      if (!plan) continue;
       try {
         // Snapshot: the persisted write must see the pending fields exactly
         // as loaded, independent of the in-memory mutation below.
-        await this.students.promotePendingPackage({ ...student });
+        await this.students.promotePendingChanges(
+          { ...student },
+          monthStartKey,
+        );
       } catch (err) {
         this.logger.error(
           `Pending-package promotion failed for ${student.id}`,
@@ -130,29 +137,29 @@ export class AutoRenewService {
         continue;
       }
       // Mirror the persisted promotion in-memory for the loops below.
-      const onTime = student.pending_package_effective === monthStartKey;
-      student.package = student.pending_package;
-      student.package_start_date = `${student.pending_package_effective}T00:00:00`;
+      const onTime = plan.last.effective === monthStartKey;
+      student.package = plan.last.package;
+      student.package_start_date = `${plan.last.effective}T00:00:00`;
       if (student.package === CUSTOM_PACKAGE) {
-        student.custom_monthly_cost = student.pending_custom_monthly_cost;
-        student.custom_sessions_per_week =
-          student.pending_custom_sessions_per_week;
-        student.custom_session_length_min =
-          student.pending_custom_session_length_min;
+        student.custom_monthly_cost = plan.last.custom_monthly_cost;
+        student.custom_sessions_per_week = plan.last.custom_sessions_per_week;
+        student.custom_session_length_min = plan.last.custom_session_length_min;
       } else {
         delete student.custom_monthly_cost;
         delete student.custom_sessions_per_week;
         delete student.custom_session_length_min;
       }
-      if (student.pending_schedule && student.pending_schedule.length > 0) {
-        student.schedule = student.pending_schedule;
+      if (plan.schedule) {
+        student.schedule = plan.schedule;
       }
-      delete student.pending_package;
-      delete student.pending_custom_monthly_cost;
-      delete student.pending_custom_sessions_per_week;
-      delete student.pending_custom_session_length_min;
-      delete student.pending_package_effective;
-      delete student.pending_schedule;
+      if (plan.remaining.length > 0) {
+        student.pending_changes = plan.remaining;
+      } else {
+        delete student.pending_changes;
+      }
+      for (const field of LEGACY_PENDING_FIELDS) {
+        delete (student as unknown as Record<string, unknown>)[field];
+      }
       promotedContactIds.add(student.contact_id);
       if (onTime) {
         promotedOnTime.push(student);

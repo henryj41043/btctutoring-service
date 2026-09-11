@@ -61,10 +61,14 @@ const student = (over: Partial<Student> = {}): Student =>
     status: 'Active Student',
     assigned_tutor_id: 't-1',
     package: 'Thrive',
-    pending_package: 'Excel',
-    pending_package_effective: '2026-09-24',
+    pending_changes: [{ package: 'Excel', effective: '2026-09-24' }],
     ...over,
   }) as Student;
+const change = (over: Record<string, unknown> = {}) => ({
+  package: 'Excel',
+  effective: '2026-09-24',
+  ...over,
+});
 
 describe('PackageChangeNoticeService', () => {
   let service: PackageChangeNoticeService;
@@ -115,14 +119,18 @@ describe('PackageChangeNoticeService', () => {
   it('announces a change due within 14 days to every admin and the effective tutors, then stamps it', async () => {
     studentsService.getStudents.mockResolvedValue([
       student({
-        pending_schedule: [
-          { weekday: 'MONDAY', start_time: '16:00', end_time: '16:45' },
-          {
-            weekday: 'THURSDAY',
-            start_time: '09:05',
-            end_time: '09:50',
-            tutor_id: 't-2',
-          },
+        pending_changes: [
+          change({
+            schedule: [
+              { weekday: 'MONDAY', start_time: '16:00', end_time: '16:45' },
+              {
+                weekday: 'THURSDAY',
+                start_time: '09:05',
+                end_time: '09:50',
+                tutor_id: 't-2',
+              },
+            ],
+          }),
         ],
       }),
     ] as never);
@@ -148,7 +156,7 @@ describe('PackageChangeNoticeService', () => {
     );
     expect(body).not.toContain('⚠');
     expect(studentsService.markPendingChangeNoticeSent).toHaveBeenCalledWith(
-      's-1',
+      expect.objectContaining({ id: 's-1' }),
       '2026-09-24',
     );
   });
@@ -167,10 +175,14 @@ describe('PackageChangeNoticeService', () => {
   it('describes a pending Custom package with its overrides', async () => {
     studentsService.getStudents.mockResolvedValue([
       student({
-        pending_package: 'Custom',
-        pending_custom_monthly_cost: 400,
-        pending_custom_sessions_per_week: 2,
-        pending_custom_session_length_min: 45,
+        pending_changes: [
+          change({
+            package: 'Custom',
+            custom_monthly_cost: 400,
+            custom_sessions_per_week: 2,
+            custom_session_length_min: 45,
+          }),
+        ],
       }),
     ] as never);
     await service.sendPackageChangeNotices();
@@ -212,7 +224,7 @@ describe('PackageChangeNoticeService', () => {
         id: 's-2',
         name: 'Sam',
         assigned_tutor_id: 't-2',
-        pending_package_effective: '2026-09-15',
+        pending_changes: [change({ effective: '2026-09-15' })],
       }),
     ] as never);
     await service.sendPackageChangeNotices();
@@ -234,16 +246,28 @@ describe('PackageChangeNoticeService', () => {
   });
 
   it.each([
-    ['effective today', { pending_package_effective: '2026-09-10' }],
-    ['effective in the past', { pending_package_effective: '2026-09-01' }],
-    ['beyond the 14-day horizon', { pending_package_effective: '2026-09-25' }],
+    [
+      'effective today',
+      { pending_changes: [change({ effective: '2026-09-10' })] },
+    ],
+    [
+      'effective in the past',
+      { pending_changes: [change({ effective: '2026-09-01' })] },
+    ],
+    [
+      'beyond the 14-day horizon',
+      { pending_changes: [change({ effective: '2026-09-25' })] },
+    ],
     [
       'already announced for this effective date',
-      { pending_change_notice_sent: '2026-09-24' },
+      { pending_changes: [change({ notice_sent: '2026-09-24' })] },
     ],
     ['not an active student', { status: 'Onboarding' }],
-    ['no pending package', { pending_package: undefined }],
-    ['no effective date', { pending_package_effective: undefined }],
+    ['no pending changes', { pending_changes: [] }],
+    [
+      'no pending changes at all (legacy scalars absent)',
+      { pending_changes: undefined },
+    ],
   ])('sends nothing when %s', async (_label, over) => {
     studentsService.getStudents.mockResolvedValue([
       student(over as Partial<Student>),
@@ -255,18 +279,73 @@ describe('PackageChangeNoticeService', () => {
 
   it('announces on the boundary day (exactly 14 days out) and re-announces a re-dated change', async () => {
     studentsService.getStudents.mockResolvedValue([
-      student({
-        pending_package_effective: '2026-09-24',
-        pending_change_notice_sent: '2026-09-15',
-      }),
+      student({ pending_changes: [change({ notice_sent: '2026-09-15' })] }),
     ] as never);
     await service.sendPackageChangeNotices();
     expect(sentEmails().length).toBeGreaterThan(0);
     expect(studentsService.markPendingChangeNoticeSent).toHaveBeenCalledWith(
-      's-1',
+      expect.objectContaining({ id: 's-1' }),
       '2026-09-24',
     );
     expect(NOTICE_DAYS_AHEAD).toBe(14);
+  });
+
+  it('announces per queued entry: a stamped entry is skipped, a later out-of-horizon one waits, the prior package is the previous step', async () => {
+    studentsService.getStudents.mockResolvedValue([
+      student({
+        pending_changes: [
+          change({ effective: '2026-09-15', notice_sent: '2026-09-15' }), // already announced
+          change({ package: 'Succeed', effective: '2026-09-24' }), // due now; prior step = Excel
+          change({ package: 'Apex', effective: '2026-12-01' }), // beyond horizon
+        ],
+      }),
+    ] as never);
+    await service.sendPackageChangeNotices();
+    const body = bodyTo('ada@x.com');
+    expect(body).toContain('Current package: Excel');
+    expect(body).toContain('New package: Succeed');
+    expect(body).not.toContain('Apex');
+    expect(studentsService.markPendingChangeNoticeSent).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(studentsService.markPendingChangeNoticeSent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's-1' }),
+      '2026-09-24',
+    );
+  });
+
+  it('announces a legacy-shaped student (read fallback) and unions slot tutors across every queued schedule', async () => {
+    studentsService.getStudents.mockResolvedValue([
+      student({
+        pending_changes: undefined,
+        pending_package: 'Excel',
+        pending_package_effective: '2026-09-24',
+      }),
+      student({
+        id: 's-2',
+        name: 'Sam',
+        pending_changes: [
+          change({ effective: '2026-09-20' }),
+          change({
+            package: 'Apex',
+            effective: '2027-03-01',
+            schedule: [
+              {
+                weekday: 'MONDAY',
+                start_time: '16:00',
+                end_time: '16:30',
+                tutor_id: 't-2',
+              },
+            ],
+          }),
+        ],
+      }),
+    ] as never);
+    await service.sendPackageChangeNotices();
+    expect(bodyTo('ada@x.com')).toContain('Pat (Kay Roe)');
+    // t-2 only tutors Sam's far-future entry, yet hears about Sam's September change.
+    expect(bodyTo('tim@x.com')).toContain('Sam');
+    expect(bodyTo('tim@x.com')).not.toContain('Pat');
   });
 
   it('does nothing (and stamps nothing) without SES_FROM_EMAIL', async () => {
@@ -301,7 +380,7 @@ describe('PackageChangeNoticeService', () => {
       .resolves({});
     await service.sendPackageChangeNotices();
     expect(studentsService.markPendingChangeNoticeSent).toHaveBeenCalledWith(
-      's-1',
+      expect.objectContaining({ id: 's-1' }),
       '2026-09-24',
     );
   });
@@ -329,8 +408,10 @@ describe('PackageChangeNoticeService', () => {
       student({
         contact_id: 'nobody',
         assigned_tutor_id: undefined,
-        pending_schedule: [
-          { weekday: 'FUNDAY', start_time: 'bad', end_time: '' },
+        pending_changes: [
+          change({
+            schedule: [{ weekday: 'FUNDAY', start_time: 'bad', end_time: '' }],
+          }),
         ],
       }),
     ] as never);

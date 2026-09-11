@@ -7,20 +7,17 @@ import { OnboardingRow } from '../models/onboarding-row.model';
 import { STUDENT_STATUS } from './student-status';
 import { CUSTOM_PACKAGE } from '../billing/package-config';
 import { randomUUID } from 'crypto';
+import {
+  LEGACY_PENDING_FIELDS,
+  pendingChangesOf,
+  planPromotion,
+  sanitizePendingChanges,
+  withNoticeSent,
+} from './pending-changes';
+import { PendingChange } from '../models/student.model';
 
 /** Max keys per dynamoose batchGet request. */
 const BATCH_GET_LIMIT = 100;
-
-/** Every scheduled-package-change field, cleared together. */
-const PENDING_FIELDS = [
-  'pending_package',
-  'pending_custom_monthly_cost',
-  'pending_custom_sessions_per_week',
-  'pending_custom_session_length_min',
-  'pending_package_effective',
-  'pending_schedule',
-  'pending_change_notice_sent',
-] as const;
 
 @Injectable()
 export class StudentsService {
@@ -35,8 +32,8 @@ export class StudentsService {
     const schedule = Array.isArray(student.schedule)
       ? student.schedule.filter((s) => s && typeof s === 'object')
       : undefined;
-    const pendingSchedule = Array.isArray(student.pending_schedule)
-      ? student.pending_schedule.filter((s) => s && typeof s === 'object')
+    const pendingChanges = Array.isArray(student.pending_changes)
+      ? sanitizePendingChanges(student.pending_changes)
       : undefined;
     const makeUpBatches = Array.isArray(student.make_up_batches)
       ? student.make_up_batches.filter((b) => b && typeof b === 'object')
@@ -75,16 +72,11 @@ export class StudentsService {
           : undefined,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
-      pending_package: student.pending_package,
-      pending_custom_monthly_cost: student.pending_custom_monthly_cost,
-      pending_custom_sessions_per_week:
-        student.pending_custom_sessions_per_week,
-      pending_custom_session_length_min:
-        student.pending_custom_session_length_min,
-      pending_package_effective: student.pending_package_effective,
-      pending_schedule:
-        pendingSchedule && pendingSchedule.length > 0
-          ? pendingSchedule
+      // The legacy pending_* scalars are never written again (see
+      // pendingChangesRequested) — only the list.
+      pending_changes:
+        pendingChanges && pendingChanges.length > 0
+          ? pendingChanges
           : undefined,
     };
 
@@ -101,9 +93,23 @@ export class StudentsService {
     return Array.isArray(student.schedule) && student.schedule.length === 0;
   }
 
-  /** True when the client sent an empty pending_package, signalling "clear the scheduled change". */
-  private isPendingCleared(student: Student): boolean {
-    return student.pending_package === '';
+  /**
+   * The scheduled-change list the client wants stored, or undefined to leave
+   * the attribute alone. Accepts the list itself ([] = clear all), plus the
+   * two legacy single-change signals an older app build still sends: '' =
+   * clear, and a filled scalar pair = a one-entry list.
+   */
+  private pendingChangesRequested(
+    student: Student,
+  ): PendingChange[] | undefined {
+    if (Array.isArray(student.pending_changes)) {
+      return sanitizePendingChanges(student.pending_changes);
+    }
+    if (student.pending_package === '') return [];
+    if (student.pending_package && student.pending_package_effective) {
+      return pendingChangesOf(student);
+    }
+    return undefined;
   }
 
   /** True when the client sent an explicitly empty make-up batch list (all consumed/expired). */
@@ -340,13 +346,21 @@ export class StudentsService {
     ) {
       remove.push('extra_planning_by_tutor');
     }
-    if (this.isPendingCleared(student)) {
-      // '' is a string, so it survives the null/undefined strip — the pending
-      // keys must leave $SET too (DynamoDB rejects overlapping SET/REMOVE
-      // paths in one update).
-      for (const field of PENDING_FIELDS) {
+    const requested = this.pendingChangesRequested(student);
+    if (requested !== undefined) {
+      // Any pending write converges the record on the list: the legacy
+      // scalars always leave (a $REMOVE of an absent path is a no-op), and
+      // an empty list removes the attribute outright. Nothing may sit in
+      // both $SET and $REMOVE (DynamoDB rejects overlapping paths).
+      for (const field of LEGACY_PENDING_FIELDS) {
         remove.push(field);
         delete attributes[field];
+      }
+      if (requested.length === 0) {
+        remove.push('pending_changes');
+        delete attributes.pending_changes;
+      } else {
+        attributes.pending_changes = requested;
       }
     }
     const update =
@@ -407,54 +421,67 @@ export class StudentsService {
   }
 
   /**
-   * Applies a due scheduled package change to the stored student: the pending
-   * package (and its CUSTOM overrides) becomes current, the pending schedule
-   * (when defined) replaces the weekly slots, package_start_date becomes the
-   * effective date, and every pending field is removed. Called by the
-   * 1st-of-month cron; a direct model update because buildStudentAttributes
-   * has no scalar-$REMOVE path.
-   */
-  /**
-   * Stamps the effective date the advance-notice email went out for, so the
-   * daily cron never notifies twice for the same scheduled change. Cron-only
-   * (not part of the admin update payload); cleared with the pending fields.
+   * Stamps the effective date a change's advance-notice email went out for,
+   * so the daily cron never notifies twice for the same change. Rewrites the
+   * whole list (stamp lives on the entry) from the student as loaded, and
+   * converges a legacy record on the list while at it. Cron-only.
    */
   async markPendingChangeNoticeSent(
-    id: string,
+    student: Student,
     effective: string,
   ): Promise<void> {
     await StudentsModel.update(
-      { id },
-      { pending_change_notice_sent: effective },
+      { id: student.id },
+      {
+        $SET: {
+          pending_changes: withNoticeSent(pendingChangesOf(student), effective),
+        },
+        $REMOVE: [...LEGACY_PENDING_FIELDS],
+      },
     ).catch((error: Error) => {
       Logger.error(error.message, error);
       return Promise.reject(error);
     });
   }
 
-  async promotePendingPackage(student: Student): Promise<void> {
-    const isCustom = student.pending_package === CUSTOM_PACKAGE;
+  /**
+   * Applies every scheduled change whose effective date has arrived
+   * (`<= monthStartKey`, 'YYYY-MM-01') in one write: the LAST due change's
+   * package (and CUSTOM overrides) becomes current, the last due change that
+   * carries a schedule replaces the weekly slots, package_start_date becomes
+   * the last due effective date, the future changes are written back as the
+   * list (or the attribute is removed when none remain), and the legacy
+   * scalars leave. No-op when nothing is due. Called by the 1st-of-month
+   * cron; a direct model update because buildStudentAttributes has no
+   * scalar-$REMOVE path.
+   */
+  async promotePendingChanges(
+    student: Student,
+    monthStartKey: string,
+  ): Promise<void> {
+    const plan = planPromotion(student, monthStartKey);
+    if (!plan) return;
+    const isCustom = plan.last.package === CUSTOM_PACKAGE;
     const sets: Record<string, unknown> = {
-      package: student.pending_package,
+      package: plan.last.package,
       // Zoneless local-wall stamp (mid-month precedent): a bare 'YYYY-MM-DD'
       // parses as UTC midnight, which reads as the prior evening on an
       // Eastern browser and mis-prorates the effective month.
-      package_start_date: `${student.pending_package_effective}T00:00:00`,
+      package_start_date: `${plan.last.effective}T00:00:00`,
     };
     if (isCustom) {
-      sets.custom_monthly_cost = student.pending_custom_monthly_cost;
-      sets.custom_sessions_per_week = student.pending_custom_sessions_per_week;
-      sets.custom_session_length_min =
-        student.pending_custom_session_length_min;
+      sets.custom_monthly_cost = plan.last.custom_monthly_cost;
+      sets.custom_sessions_per_week = plan.last.custom_sessions_per_week;
+      sets.custom_session_length_min = plan.last.custom_session_length_min;
     }
-    if (student.pending_schedule && student.pending_schedule.length > 0) {
-      sets.schedule = student.pending_schedule;
-    }
-    // dynamoose rejects undefined $SET values (an incomplete CUSTOM pending).
+    if (plan.schedule) sets.schedule = plan.schedule;
+    if (plan.remaining.length > 0) sets.pending_changes = plan.remaining;
+    // dynamoose rejects undefined $SET values (an incomplete CUSTOM change).
     for (const key of Object.keys(sets)) {
       if (sets[key] === undefined) delete sets[key];
     }
-    const removes: string[] = [...PENDING_FIELDS];
+    const removes: string[] = [...LEGACY_PENDING_FIELDS];
+    if (plan.remaining.length === 0) removes.push('pending_changes');
     if (!isCustom) {
       // Stale overrides must not leak into a later switch to CUSTOM.
       removes.push(

@@ -1,5 +1,17 @@
 import * as dynamoose from 'dynamoose';
 
+/** One weekly slot; shared by the live schedule and every pending change. */
+const SCHEDULE_SLOT_SCHEMA = {
+  type: Object,
+  schema: {
+    weekday: String,
+    start_time: String,
+    end_time: String,
+    // Optional per-slot tutor override; absent = the assigned tutor.
+    tutor_id: String,
+  },
+};
+
 export const StudentsSchema = new dynamoose.Schema({
   id: {
     type: String,
@@ -18,18 +30,7 @@ export const StudentsSchema = new dynamoose.Schema({
   btc_and_me: Boolean,
   schedule: {
     type: Array,
-    schema: [
-      {
-        type: Object,
-        schema: {
-          weekday: String,
-          start_time: String,
-          end_time: String,
-          // Optional per-slot tutor override; absent = the assigned tutor.
-          tutor_id: String,
-        },
-      },
-    ],
+    schema: [SCHEDULE_SLOT_SCHEMA],
   },
   package_start_date: String,
   auto_renew: Boolean,
@@ -74,9 +75,32 @@ export const StudentsSchema = new dynamoose.Schema({
   // month, applied on top of the new package's charge only in that month.
   mid_month_prior_charge: Number,
   mid_month_change_period: String,
-  // Scheduled package change: applied by the 1st-of-month cron once the
-  // effective date arrives; billing resolves the pending package for any
-  // month >= the effective month even before promotion.
+  // Scheduled package changes, oldest effective first: each is applied by
+  // the 1st-of-month cron once its effective date arrives; billing resolves
+  // the latest change whose effective month <= the billed month even before
+  // promotion.
+  pending_changes: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          package: String,
+          // 'YYYY-MM-DD', always the 1st of a month.
+          effective: String,
+          custom_monthly_cost: Number,
+          custom_sessions_per_week: Number,
+          custom_session_length_min: Number,
+          // The effective date this change's advance notice was sent for.
+          notice_sent: String,
+          // The new package's weekly slots, swapped in at promotion.
+          schedule: { type: Array, schema: [SCHEDULE_SLOT_SCHEMA] },
+        },
+      },
+    ],
+  },
+  // DEPRECATED single-change scalars (replaced by pending_changes): kept so
+  // leftover records read cleanly and the $REMOVE paths stay schema-known.
   pending_package: String,
   pending_custom_monthly_cost: Number,
   pending_custom_sessions_per_week: Number,
@@ -89,18 +113,7 @@ export const StudentsSchema = new dynamoose.Schema({
   // The new package's weekly slots, swapped in at promotion.
   pending_schedule: {
     type: Array,
-    schema: [
-      {
-        type: Object,
-        schema: {
-          weekday: String,
-          start_time: String,
-          end_time: String,
-          // Optional per-slot tutor override; absent = the assigned tutor.
-          tutor_id: String,
-        },
-      },
-    ],
+    schema: [SCHEDULE_SLOT_SCHEMA],
   },
   // Deprecated: replaced by package-driven scheduling. Kept so reads of
   // pre-existing records don't error.
