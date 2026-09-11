@@ -546,53 +546,40 @@ describe('StudentsService', () => {
       expect(update.$SET).not.toHaveProperty('schedule');
     });
 
-    it('persists the scheduled-package-change fields', async () => {
+    it('persists a sanitized scheduled-change list and removes the legacy scalars, with no $SET overlap', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(
         sampleStudent({
-          pending_package: 'Achieve',
-          pending_package_effective: '2026-09-01',
-          pending_custom_monthly_cost: 500,
-          pending_schedule: [
-            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          pending_changes: [
+            {
+              package: 'Succeed',
+              effective: '2027-01-01',
+              custom_monthly_cost: null as unknown as number,
+            },
+            {
+              package: 'Achieve',
+              effective: '2026-09-01',
+              schedule: [
+                { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+              ],
+            },
           ],
-        }),
-      );
-      expect(Model.update).toHaveBeenCalledWith(
-        { id: 'student-1' },
-        expect.objectContaining({
-          pending_package: 'Achieve',
-          pending_package_effective: '2026-09-01',
-          pending_custom_monthly_cost: 500,
-          pending_schedule: [
-            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
-          ],
-        }),
-      );
-    });
-
-    it('drops an empty pending_schedule from the write', async () => {
-      Model.update.mockResolvedValue(sampleStudent());
-      await service.updateStudent(
-        sampleStudent({ pending_package: 'Achieve', pending_schedule: [] }),
-      );
-      const upd = Model.update.mock.calls.at(-1)![1] as Record<string, unknown>;
-      expect(upd).not.toHaveProperty('pending_schedule');
-    });
-
-    it('clears every pending field on the empty-string signal, with no $SET overlap', async () => {
-      Model.update.mockResolvedValue(sampleStudent());
-      await service.updateStudent(
-        sampleStudent({
-          pending_package: '',
-          pending_package_effective: '2026-09-01',
-          pending_custom_monthly_cost: 500,
         }),
       );
       const update = Model.update.mock.calls.at(-1)![1] as {
         $SET: Record<string, unknown>;
         $REMOVE: string[];
       };
+      expect(update.$SET.pending_changes).toEqual([
+        {
+          package: 'Achieve',
+          effective: '2026-09-01',
+          schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        },
+        { package: 'Succeed', effective: '2027-01-01' },
+      ]);
       expect(update.$REMOVE).toEqual([
         'pending_package',
         'pending_custom_monthly_cost',
@@ -602,11 +589,80 @@ describe('StudentsService', () => {
         'pending_schedule',
         'pending_change_notice_sent',
       ]);
-      // DynamoDB rejects overlapping SET/REMOVE paths — none may remain.
       for (const field of update.$REMOVE) {
         expect(update.$SET).not.toHaveProperty(field);
       }
-      expect(update.$SET.name).toBe('Pat'); // the rest of the save still lands
+      expect(update.$SET.name).toBe('Pat');
+    });
+
+    it('an empty list clears every scheduled change (attribute removed, legacy scalars too)', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(sampleStudent({ pending_changes: [] }));
+      const update = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(update.$REMOVE).toContain('pending_changes');
+      expect(update.$REMOVE).toContain('pending_package');
+      expect(update.$SET).not.toHaveProperty('pending_changes');
+    });
+
+    it("still honours an old app's legacy signals: '' clears, a filled scalar pair becomes a one-entry list", async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({
+          pending_package: '',
+          pending_package_effective: '2026-09-01',
+        }),
+      );
+      let update = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(update.$REMOVE).toContain('pending_changes');
+      expect(update.$SET).not.toHaveProperty('pending_package');
+
+      await service.updateStudent(
+        sampleStudent({
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+          pending_custom_monthly_cost: 500,
+          pending_schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        }),
+      );
+      update = Model.update.mock.calls.at(-1)![1] as {
+        $SET: Record<string, unknown>;
+        $REMOVE: string[];
+      };
+      expect(update.$SET.pending_changes).toEqual([
+        {
+          package: 'Achieve',
+          effective: '2026-09-01',
+          custom_monthly_cost: 500,
+          schedule: [
+            { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+        },
+      ]);
+      expect(update.$REMOVE).toContain('pending_package');
+      expect(update.$SET).not.toHaveProperty('pending_package');
+      expect(update.$SET).not.toHaveProperty('pending_schedule');
+    });
+
+    it('leaves the scheduled changes alone when the payload carries no pending keys', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.updateStudent(
+        sampleStudent({ pending_package: 'Achieve' }),
+      ); // no effective → not a signal
+      const update = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(update).not.toHaveProperty('$REMOVE');
+      expect(update).not.toHaveProperty('pending_changes');
+      expect(update).not.toHaveProperty('pending_package');
     });
 
     it('persists the scholarship flag', async () => {
@@ -706,74 +762,171 @@ describe('StudentsService', () => {
   });
 
   describe('markPendingChangeNoticeSent', () => {
-    it('stamps the effective date the notice was sent for (cron idempotency)', async () => {
+    it('stamps the matching entry, rewriting the list and removing legacy scalars', async () => {
       Model.update.mockResolvedValue(undefined);
-      await service.markPendingChangeNoticeSent('s-1', '2026-10-01');
-      expect(Model.update).toHaveBeenCalledWith(
-        { id: 's-1' },
-        { pending_change_notice_sent: '2026-10-01' },
+      await service.markPendingChangeNoticeSent(
+        sampleStudent({
+          pending_changes: [
+            { package: 'Succeed', effective: '2027-01-01' },
+            { package: 'Excel', effective: '2026-10-01' },
+          ],
+        }),
+        '2026-10-01',
       );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        {
+          $SET: {
+            pending_changes: [
+              {
+                package: 'Excel',
+                effective: '2026-10-01',
+                notice_sent: '2026-10-01',
+              },
+              { package: 'Succeed', effective: '2027-01-01' },
+            ],
+          },
+          $REMOVE: [
+            'pending_package',
+            'pending_custom_monthly_cost',
+            'pending_custom_sessions_per_week',
+            'pending_custom_session_length_min',
+            'pending_package_effective',
+            'pending_schedule',
+            'pending_change_notice_sent',
+          ],
+        },
+      );
+    });
+
+    it('converges a legacy-shaped student on the list while stamping', async () => {
+      Model.update.mockResolvedValue(undefined);
+      await service.markPendingChangeNoticeSent(
+        sampleStudent({
+          pending_package: 'Excel',
+          pending_package_effective: '2026-10-01',
+        }),
+        '2026-10-01',
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.pending_changes).toEqual([
+        {
+          package: 'Excel',
+          effective: '2026-10-01',
+          notice_sent: '2026-10-01',
+        },
+      ]);
     });
 
     it('rejects when the write fails', async () => {
       Model.update.mockRejectedValue(new Error('write boom'));
       await expect(
-        service.markPendingChangeNoticeSent('s-1', '2026-10-01'),
+        service.markPendingChangeNoticeSent(sampleStudent(), '2026-10-01'),
       ).rejects.toThrow('write boom');
     });
   });
 
-  describe('promotePendingPackage', () => {
+  describe('promotePendingChanges', () => {
+    const monday = {
+      weekday: 'MONDAY',
+      start_time: '10:00',
+      end_time: '10:30',
+    };
     const pendingStudent = (overrides: Partial<Student> = {}): Student =>
       sampleStudent({
         package: 'Succeed',
         custom_monthly_cost: 111,
         custom_sessions_per_week: 1,
         custom_session_length_min: 30,
-        pending_package: 'Achieve',
-        pending_package_effective: '2026-09-01',
-        pending_schedule: [
-          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+        pending_changes: [
+          { package: 'Achieve', effective: '2026-09-01', schedule: [monday] },
         ],
         ...overrides,
       });
+    const LEGACY = [
+      'pending_package',
+      'pending_custom_monthly_cost',
+      'pending_custom_sessions_per_week',
+      'pending_custom_session_length_min',
+      'pending_package_effective',
+      'pending_schedule',
+      'pending_change_notice_sent',
+    ];
 
-    it('promotes a non-CUSTOM pending: package, wall-stamped start, schedule; removes pending + stale customs', async () => {
+    it('promotes a non-CUSTOM change: package, wall-stamped start, schedule; removes the list, legacy scalars + stale customs', async () => {
       Model.update.mockResolvedValue(sampleStudent());
-      await service.promotePendingPackage(pendingStudent());
+      await service.promotePendingChanges(pendingStudent(), '2026-09-01');
       const [key, update] = Model.update.mock.calls.at(-1)!;
       expect(key).toEqual({ id: 'student-1' });
       expect(update.$SET).toEqual({
         package: 'Achieve',
         // Zoneless local-wall stamp — never a bare 'YYYY-MM-DD'.
         package_start_date: '2026-09-01T00:00:00',
-        schedule: [
-          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
-        ],
+        schedule: [monday],
       });
       expect(update.$REMOVE).toEqual([
-        'pending_package',
-        'pending_custom_monthly_cost',
-        'pending_custom_sessions_per_week',
-        'pending_custom_session_length_min',
-        'pending_package_effective',
-        'pending_schedule',
-        'pending_change_notice_sent',
+        ...LEGACY,
+        'pending_changes',
         'custom_monthly_cost',
         'custom_sessions_per_week',
         'custom_session_length_min',
       ]);
     });
 
-    it('promotes a CUSTOM pending with its overrides, keeping custom fields set', async () => {
+    it('is a no-op when nothing is due', async () => {
+      await service.promotePendingChanges(pendingStudent(), '2026-08-01');
+      await service.promotePendingChanges(sampleStudent(), '2026-09-01');
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('applies several due changes in one write: last wins, future entries written back', async () => {
       Model.update.mockResolvedValue(sampleStudent());
-      await service.promotePendingPackage(
+      const tuesday = {
+        weekday: 'TUESDAY',
+        start_time: '10:00',
+        end_time: '10:30',
+      };
+      await service.promotePendingChanges(
         pendingStudent({
-          pending_package: 'Custom',
-          pending_custom_monthly_cost: 500,
-          pending_custom_sessions_per_week: 2,
-          pending_custom_session_length_min: 45,
+          pending_changes: [
+            { package: 'Excel', effective: '2026-12-01' },
+            { package: 'Achieve', effective: '2026-09-01', schedule: [monday] },
+            { package: 'Apex', effective: '2026-10-01', schedule: [tuesday] },
+            { package: 'Thrive', effective: '2026-11-01' },
+          ],
         }),
+        '2026-11-01',
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET).toEqual({
+        package: 'Thrive',
+        package_start_date: '2026-11-01T00:00:00',
+        schedule: [tuesday],
+        pending_changes: [{ package: 'Excel', effective: '2026-12-01' }],
+      });
+      expect(update.$REMOVE).toEqual([
+        ...LEGACY,
+        'custom_monthly_cost',
+        'custom_sessions_per_week',
+        'custom_session_length_min',
+      ]);
+    });
+
+    it('promotes a CUSTOM change with its overrides, keeping custom fields set', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingChanges(
+        pendingStudent({
+          pending_changes: [
+            {
+              package: 'Custom',
+              effective: '2026-09-01',
+              custom_monthly_cost: 500,
+              custom_sessions_per_week: 2,
+              custom_session_length_min: 45,
+            },
+          ],
+        }),
+        '2026-09-01',
       );
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET).toEqual(
@@ -784,28 +937,24 @@ describe('StudentsService', () => {
           custom_session_length_min: 45,
         }),
       );
-      expect(update.$REMOVE).not.toContain('custom_monthly_cost');
-    });
-
-    it('keeps the old schedule when no pending schedule was defined', async () => {
-      Model.update.mockResolvedValue(sampleStudent());
-      await service.promotePendingPackage(
-        pendingStudent({ pending_schedule: undefined }),
-      );
-      const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET).not.toHaveProperty('schedule');
-      expect(update.$REMOVE).toContain('pending_schedule');
+      expect(update.$REMOVE).not.toContain('custom_monthly_cost');
+      expect(update.$REMOVE).toContain('pending_changes');
     });
 
     it('drops undefined CUSTOM overrides rather than writing them', async () => {
       Model.update.mockResolvedValue(sampleStudent());
-      await service.promotePendingPackage(
+      await service.promotePendingChanges(
         pendingStudent({
-          pending_package: 'Custom',
-          pending_custom_monthly_cost: 500,
-          pending_custom_sessions_per_week: undefined,
-          pending_custom_session_length_min: undefined,
+          pending_changes: [
+            {
+              package: 'Custom',
+              effective: '2026-09-01',
+              custom_monthly_cost: 500,
+            },
+          ],
         }),
+        '2026-09-01',
       );
       const [, update] = Model.update.mock.calls.at(-1)!;
       expect(update.$SET).toHaveProperty('custom_monthly_cost', 500);
@@ -813,10 +962,25 @@ describe('StudentsService', () => {
       expect(update.$SET).not.toHaveProperty('custom_session_length_min');
     });
 
+    it('promotes a legacy-shaped student (read fallback)', async () => {
+      Model.update.mockResolvedValue(sampleStudent());
+      await service.promotePendingChanges(
+        sampleStudent({
+          package: 'Succeed',
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+        }),
+        '2026-09-01',
+      );
+      const [, update] = Model.update.mock.calls.at(-1)!;
+      expect(update.$SET.package).toBe('Achieve');
+      expect(update.$REMOVE).toContain('pending_package');
+    });
+
     it('propagates a failed promotion write', async () => {
       Model.update.mockRejectedValue(new Error('promote boom'));
       await expect(
-        service.promotePendingPackage(pendingStudent()),
+        service.promotePendingChanges(pendingStudent(), '2026-09-01'),
       ).rejects.toThrow('promote boom');
     });
   });

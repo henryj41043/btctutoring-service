@@ -6,6 +6,23 @@ export class ScheduleSlot {
   tutor_id?: string;
 }
 
+/**
+ * One scheduled package change. `effective` ('YYYY-MM-01') is the key —
+ * unique per student — so no synthetic id is needed.
+ */
+export class PendingChange {
+  package: string;
+  /** 'YYYY-MM-DD', always the 1st of a month. */
+  effective: string;
+  custom_monthly_cost?: number;
+  custom_sessions_per_week?: number;
+  custom_session_length_min?: number;
+  /** The new package's weekly slots, swapped in at promotion (omitted when unset). */
+  schedule?: ScheduleSlot[];
+  /** The effective date this change's advance notice was sent for (cron-only writer). */
+  notice_sent?: string;
+}
+
 /** A dated lot of remaining make-up minutes; expires 90 days after earned_date. */
 export class MakeupBatch {
   minutes: number;
@@ -45,18 +62,23 @@ export class Student {
   /** Old package's prorated portion for a mid-month package change month. */
   mid_month_prior_charge?: number;
   /**
-   * Scheduled package change, applied by the 1st-of-month cron on its
-   * effective date ('' from the client = clear the pending change).
+   * Scheduled package changes, oldest effective first; each is applied by
+   * the 1st-of-month cron on its effective date ([] on save = clear all).
    */
+  pending_changes?: PendingChange[];
+  /** @deprecated Single-change scalars; read as a one-entry list, never written ('' = clear). */
   pending_package?: string;
+  /** @deprecated See pending_changes. */
   pending_custom_monthly_cost?: number;
+  /** @deprecated See pending_changes. */
   pending_custom_sessions_per_week?: number;
+  /** @deprecated See pending_changes. */
   pending_custom_session_length_min?: number;
-  /** 'YYYY-MM-DD', always the 1st of a month. */
+  /** @deprecated See pending_changes. */
   pending_package_effective?: string;
-  /** The pending_package_effective the advance-notice email was sent for (cron idempotency). */
+  /** @deprecated See pending_changes (notice_sent per entry). */
   pending_change_notice_sent?: string;
-  /** The new package's weekly slots, swapped in at promotion. */
+  /** @deprecated See pending_changes (schedule per entry). */
   pending_schedule?: ScheduleSlot[];
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
   mid_month_change_period?: string;

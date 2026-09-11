@@ -241,8 +241,7 @@ describe('packageFieldsForMonth', () => {
     ({
       package: 'Succeed',
       custom_monthly_cost: undefined,
-      pending_package: 'Achieve',
-      pending_package_effective: '2026-09-01',
+      pending_changes: [{ package: 'Achieve', effective: '2026-09-01' }],
       ...over,
     }) as never;
 
@@ -264,13 +263,33 @@ describe('packageFieldsForMonth', () => {
     );
   });
 
+  it('resolves the LATEST reached change with several queued (unsorted input)', () => {
+    const s = pendingStudent({
+      pending_changes: [
+        { package: 'Apex', effective: '2027-01-01' },
+        { package: 'Achieve', effective: '2026-09-01' },
+        { package: 'Excel', effective: '2026-11-01' },
+      ],
+    });
+    expect(packageFieldsForMonth(s, 2026, 7).package).toBe('Succeed'); // before all
+    expect(packageFieldsForMonth(s, 2026, 8).package).toBe('Achieve'); // first reached
+    expect(packageFieldsForMonth(s, 2026, 9).package).toBe('Achieve'); // between
+    expect(packageFieldsForMonth(s, 2026, 10).package).toBe('Excel'); // second reached
+    expect(packageFieldsForMonth(s, 2027, 5).package).toBe('Apex'); // after all
+  });
+
   it('carries the pending CUSTOM overrides', () => {
     const fields = packageFieldsForMonth(
       pendingStudent({
-        pending_package: 'Custom',
-        pending_custom_monthly_cost: 500,
-        pending_custom_sessions_per_week: 2,
-        pending_custom_session_length_min: 45,
+        pending_changes: [
+          {
+            package: 'Custom',
+            effective: '2026-09-01',
+            custom_monthly_cost: 500,
+            custom_sessions_per_week: 2,
+            custom_session_length_min: 45,
+          },
+        ],
       }),
       2026,
       8,
@@ -283,10 +302,24 @@ describe('packageFieldsForMonth', () => {
     });
   });
 
-  it('ignores a pending package with no effective date', () => {
+  it('reads a legacy single change (fallback) and ignores one with no effective date', () => {
     expect(
       packageFieldsForMonth(
-        pendingStudent({ pending_package_effective: undefined }),
+        pendingStudent({
+          pending_changes: undefined,
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+        }),
+        2026,
+        8,
+      ).package,
+    ).toBe('Achieve');
+    expect(
+      packageFieldsForMonth(
+        pendingStudent({
+          pending_changes: undefined,
+          pending_package: 'Achieve',
+        }),
         2026,
         8,
       ).package,
@@ -314,8 +347,7 @@ describe('studentMonthlyCharge with a scheduled package change', () => {
     ({
       package: 'Succeed',
       package_start_date: '2026-01-01T00:00:00',
-      pending_package: 'Achieve',
-      pending_package_effective: '2026-09-01',
+      pending_changes: [{ package: 'Achieve', effective: '2026-09-01' }],
       ...over,
     }) as never;
 
@@ -324,8 +356,21 @@ describe('studentMonthlyCharge with a scheduled package change', () => {
     expect(studentMonthlyCharge(student(), 2026, 8, TEST_CATALOG)).toBe(546); // September
   });
 
+  it('charges each queued step in turn', () => {
+    const s = student({
+      pending_changes: [
+        { package: 'Achieve', effective: '2026-09-01' },
+        { package: 'Apex', effective: '2027-01-01' },
+      ],
+    });
+    expect(studentMonthlyCharge(s, 2026, 11, TEST_CATALOG)).toBe(546); // December
+    expect(studentMonthlyCharge(s, 2027, 0, TEST_CATALOG)).toBe(1820); // January
+  });
+
   it('handles a year-boundary effective date', () => {
-    const s = student({ pending_package_effective: '2027-01-01' });
+    const s = student({
+      pending_changes: [{ package: 'Achieve', effective: '2027-01-01' }],
+    });
     expect(studentMonthlyCharge(s, 2026, 11, TEST_CATALOG)).toBe(362); // December
     expect(studentMonthlyCharge(s, 2027, 0, TEST_CATALOG)).toBe(546); // January
   });

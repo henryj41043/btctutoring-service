@@ -5,7 +5,7 @@ import { TEST_CATALOG } from '../../test/package-catalog.fixture';
 
 describe('AutoRenewService', () => {
   let service: AutoRenewService;
-  const students = { getStudents: jest.fn(), promotePendingPackage: jest.fn() };
+  const students = { getStudents: jest.fn(), promotePendingChanges: jest.fn() };
   const sessions = { createSessions: jest.fn(), getAllSessions: jest.fn() };
   const contacts = { getContacts: jest.fn() };
   const billing = {
@@ -58,7 +58,7 @@ describe('AutoRenewService', () => {
     });
     sessions.createSessions.mockResolvedValue({});
     sessions.getAllSessions.mockResolvedValue([]);
-    students.promotePendingPackage.mockResolvedValue(undefined);
+    students.promotePendingChanges.mockResolvedValue(undefined);
     students.getStudents.mockResolvedValue([student()]);
     contacts.getContacts.mockResolvedValue([parent(), tutor()]);
   });
@@ -331,14 +331,18 @@ describe('AutoRenewService', () => {
           schedule: [
             { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:30' },
           ],
-          pending_package: 'Achieve',
-          pending_package_effective: '2026-07-01',
-          pending_schedule: [
+          pending_changes: [
             {
-              weekday: 'MONDAY',
-              start_time: '10:00',
-              end_time: '10:30',
-              tutor_id: 't-2',
+              package: 'Achieve',
+              effective: '2026-07-01',
+              schedule: [
+                {
+                  weekday: 'MONDAY',
+                  start_time: '10:00',
+                  end_time: '10:30',
+                  tutor_id: 't-2',
+                },
+              ],
             },
           ],
         }),
@@ -362,17 +366,20 @@ describe('AutoRenewService', () => {
   describe('scheduled package changes', () => {
     // Run month: September 2026 (the cron fires on the 1st).
     const september = new Date(2026, 8, 1);
+    const monday = {
+      weekday: 'MONDAY',
+      start_time: '10:00',
+      end_time: '10:30',
+    };
     const pendingStudent = (over: Partial<Student> = {}): Student =>
       student({
         // Old Succeed schedule: Wednesdays only → 5 September sessions.
         schedule: [
           { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:30' },
         ],
-        pending_package: 'Achieve', // $546/mo
-        pending_package_effective: '2026-09-01',
-        // New schedule: Mondays only → 4 September sessions.
-        pending_schedule: [
-          { weekday: 'MONDAY', start_time: '10:00', end_time: '10:30' },
+        // Achieve ($546/mo) from Sept 1 with a new Monday-only schedule → 4 sessions.
+        pending_changes: [
+          { package: 'Achieve', effective: '2026-09-01', schedule: [monday] },
         ],
         ...over,
       });
@@ -380,9 +387,15 @@ describe('AutoRenewService', () => {
     it('promotes on the effective 1st: persists, generates from the NEW schedule, bills the new package', async () => {
       students.getStudents.mockResolvedValue([pendingStudent()]);
       const result = await service.runAutoRenew(september);
-      // Persisted with the pending fields still intact on the passed record.
-      expect(students.promotePendingPackage).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 's-1', pending_package: 'Achieve' }),
+      // Persisted with the pending list still intact on the passed record.
+      expect(students.promotePendingChanges).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 's-1',
+          pending_changes: [
+            { package: 'Achieve', effective: '2026-09-01', schedule: [monday] },
+          ],
+        }),
+        '2026-09-01',
       );
       // Generated exactly once, from the pending (Monday) schedule.
       expect(sessions.createSessions).toHaveBeenCalledTimes(1);
@@ -401,7 +414,7 @@ describe('AutoRenewService', () => {
         pendingStudent({ auto_renew: false }),
       ]);
       await service.runAutoRenew(september);
-      expect(students.promotePendingPackage).toHaveBeenCalled();
+      expect(students.promotePendingChanges).toHaveBeenCalled();
       expect(sessions.createSessions).not.toHaveBeenCalled();
       expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
         expect.objectContaining({ amount: 546 }),
@@ -410,7 +423,9 @@ describe('AutoRenewService', () => {
 
     it('keeps the old schedule when no pending schedule was defined', async () => {
       students.getStudents.mockResolvedValue([
-        pendingStudent({ pending_schedule: undefined }),
+        pendingStudent({
+          pending_changes: [{ package: 'Achieve', effective: '2026-09-01' }],
+        }),
       ]);
       await service.runAutoRenew(september);
       const created = sessions.createSessions.mock.calls[0][0];
@@ -419,10 +434,14 @@ describe('AutoRenewService', () => {
 
     it('leaves a future-month pending change untouched', async () => {
       students.getStudents.mockResolvedValue([
-        pendingStudent({ pending_package_effective: '2026-10-01' }),
+        pendingStudent({
+          pending_changes: [
+            { package: 'Achieve', effective: '2026-10-01', schedule: [monday] },
+          ],
+        }),
       ]);
       await service.runAutoRenew(september);
-      expect(students.promotePendingPackage).not.toHaveBeenCalled();
+      expect(students.promotePendingChanges).not.toHaveBeenCalled();
       // Old package billed; old schedule renews normally.
       expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
         expect.objectContaining({ amount: 362 }),
@@ -433,10 +452,14 @@ describe('AutoRenewService', () => {
 
     it('catches up a past-dated effective (cron was down) without double-generating', async () => {
       students.getStudents.mockResolvedValue([
-        pendingStudent({ pending_package_effective: '2026-08-01' }),
+        pendingStudent({
+          pending_changes: [
+            { package: 'Achieve', effective: '2026-08-01', schedule: [monday] },
+          ],
+        }),
       ]);
       await service.runAutoRenew(september);
-      expect(students.promotePendingPackage).toHaveBeenCalled();
+      expect(students.promotePendingChanges).toHaveBeenCalled();
       // Past start date → the normal renewable path generates; exactly once.
       expect(sessions.createSessions).toHaveBeenCalledTimes(1);
       const created = sessions.createSessions.mock.calls[0][0];
@@ -459,7 +482,7 @@ describe('AutoRenewService', () => {
     });
 
     it('one failed promotion never blocks the rest of the run', async () => {
-      students.promotePendingPackage
+      students.promotePendingChanges
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValue(undefined);
       students.getStudents.mockResolvedValue([
@@ -467,7 +490,7 @@ describe('AutoRenewService', () => {
         pendingStudent({ id: 's-2', contact_id: 'c-1' }),
       ]);
       await service.runAutoRenew(september);
-      expect(students.promotePendingPackage).toHaveBeenCalledTimes(2);
+      expect(students.promotePendingChanges).toHaveBeenCalledTimes(2);
       // BOTH bill at the new package: the month-aware charge resolves the
       // pending fields even when the promotion write failed (derive-on-read),
       // and next month's cron catches the stranded promotion up.
@@ -476,17 +499,75 @@ describe('AutoRenewService', () => {
       );
     });
 
+    it('applies two due changes in one run: one promote call, the later package bills, its schedule generates', async () => {
+      const tuesday = {
+        weekday: 'TUESDAY',
+        start_time: '10:00',
+        end_time: '10:30',
+      };
+      students.getStudents.mockResolvedValue([
+        pendingStudent({
+          pending_changes: [
+            { package: 'Achieve', effective: '2026-08-01', schedule: [monday] },
+            { package: 'Apex', effective: '2026-09-01', schedule: [tuesday] }, // $1820/mo
+            { package: 'Thrive', effective: '2027-01-01' }, // stays pending
+          ],
+        }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingChanges).toHaveBeenCalledTimes(1);
+      // On time (last due === Sept 1) → generated from the Apex (Tuesday) schedule.
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(5); // Sept 2026 Tuesdays: 1, 8, 15, 22, 29
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ period_start: '2026-09-01', amount: 1820 }),
+      );
+    });
+
+    it('a later queued change never leaks into this month: earlier due promoted, later stays pending', async () => {
+      students.getStudents.mockResolvedValue([
+        pendingStudent({
+          pending_changes: [
+            { package: 'Achieve', effective: '2026-09-01', schedule: [monday] },
+            { package: 'Apex', effective: '2026-10-01' },
+          ],
+        }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 546 }), // Achieve, not Apex
+      );
+    });
+
+    it('still promotes a legacy-shaped student (read fallback)', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          schedule: [
+            { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:30' },
+          ],
+          pending_package: 'Achieve',
+          pending_package_effective: '2026-09-01',
+          pending_schedule: [monday],
+        }),
+      ]);
+      await service.runAutoRenew(september);
+      expect(students.promotePendingChanges).toHaveBeenCalledTimes(1);
+      expect(sessions.createSessions.mock.calls[0][0]).toHaveLength(4);
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 546 }),
+      );
+    });
+
     it('an unresolvable CUSTOM pending bills zero (visible, recoverable)', async () => {
       students.getStudents.mockResolvedValue([
         pendingStudent({
           auto_renew: false,
-          pending_package: 'Custom',
-          pending_schedule: undefined,
-          // no pending_custom_* overrides -> def resolves null
+          // no custom_* overrides -> def resolves null
+          pending_changes: [{ package: 'Custom', effective: '2026-09-01' }],
         }),
       ]);
       const result = await service.runAutoRenew(september);
-      expect(students.promotePendingPackage).toHaveBeenCalled();
+      expect(students.promotePendingChanges).toHaveBeenCalled();
       expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
       expect(result.billingRecords).toBe(0);
     });

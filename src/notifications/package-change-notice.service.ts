@@ -4,7 +4,8 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { ContactsService } from '../contacts/contacts.service';
 import { StudentsService } from '../students/students.service';
 import { Contact } from '../models/contact.model';
-import { ScheduleSlot, Student } from '../models/student.model';
+import { PendingChange, ScheduleSlot, Student } from '../models/student.model';
+import { pendingChangesOf } from '../students/pending-changes';
 import { CUSTOM_PACKAGE } from '../billing/package-config';
 
 /** How far ahead of the effective date the notice goes out. */
@@ -22,9 +23,12 @@ const WEEKDAY_LABELS: Record<string, string> = {
   SATURDAY: 'Sat',
 };
 
-/** One student's scheduled change, resolved for the email body. */
+/** One scheduled change of one student, resolved for the email body. */
 interface ChangeNotice {
   student: Student;
+  change: PendingChange;
+  /** The package in force just before this change (the previous queued change, else the current package). */
+  priorPackage: string;
   familyName: string;
   effective: string;
   tutorIds: string[];
@@ -33,11 +37,11 @@ interface ChangeNotice {
 /**
  * Daily 9am ET job (client request 2026-09): warns admins and the student's
  * tutors ahead of a scheduled package change so the new schedule can be set
- * before the 1st-of-month cron promotes it. A change is announced once — the
- * first morning it falls within the next NOTICE_DAYS_AHEAD days — and the
- * effective date is stamped on the student so reruns and later mornings never
- * repeat it. A change scheduled with fewer than 14 days' notice is announced
- * the next morning.
+ * before the 1st-of-month cron promotes it. Each queued change is announced
+ * once — the first morning it falls within the next NOTICE_DAYS_AHEAD days —
+ * and the effective date is stamped on that change so reruns and later
+ * mornings never repeat it. A change scheduled with fewer than 14 days'
+ * notice is announced the next morning.
  */
 @Injectable()
 export class PackageChangeNoticeService {
@@ -83,21 +87,27 @@ export class PackageChangeNoticeService {
     }
 
     const notices: ChangeNotice[] = students
-      .filter(
-        (s) =>
-          s.status === ACTIVE_STUDENT &&
-          !!s.pending_package &&
-          !!s.pending_package_effective &&
-          s.pending_package_effective > today &&
-          s.pending_package_effective <= horizon &&
-          s.pending_change_notice_sent !== s.pending_package_effective,
-      )
-      .map((student) => ({
-        student,
-        familyName: this.contactName(contactsById.get(student.contact_id)),
-        effective: student.pending_package_effective as string,
-        tutorIds: this.effectiveTutorIds(student),
-      }));
+      .filter((s) => s.status === ACTIVE_STUDENT)
+      .flatMap((student) => {
+        const changes = pendingChangesOf(student);
+        return changes
+          .map((change, index) => ({ change, index }))
+          .filter(
+            ({ change }) =>
+              change.effective > today &&
+              change.effective <= horizon &&
+              change.notice_sent !== change.effective,
+          )
+          .map(({ change, index }) => ({
+            student,
+            change,
+            priorPackage:
+              index > 0 ? changes[index - 1].package : student.package || '—',
+            familyName: this.contactName(contactsById.get(student.contact_id)),
+            effective: change.effective,
+            tutorIds: this.effectiveTutorIds(student, changes),
+          }));
+      });
 
     if (notices.length === 0) {
       this.logger.log('No upcoming package changes to announce.');
@@ -146,7 +156,7 @@ export class PackageChangeNoticeService {
     for (const notice of delivered) {
       try {
         await this.studentsService.markPendingChangeNoticeSent(
-          notice.student.id as string,
+          notice.student,
           notice.effective,
         );
       } catch (err) {
@@ -158,13 +168,16 @@ export class PackageChangeNoticeService {
     }
   }
 
-  /** Assigned tutor plus any per-slot tutor on the current AND pending schedules. */
-  private effectiveTutorIds(student: Student): string[] {
+  /** Assigned tutor plus any per-slot tutor on the current AND every queued schedule. */
+  private effectiveTutorIds(
+    student: Student,
+    changes: PendingChange[],
+  ): string[] {
     const ids = new Set<string>();
     if (student.assigned_tutor_id) ids.add(student.assigned_tutor_id);
     for (const slot of [
       ...(student.schedule ?? []),
-      ...(student.pending_schedule ?? []),
+      ...changes.flatMap((c) => c.schedule ?? []),
     ]) {
       if (slot?.tutor_id) ids.add(slot.tutor_id);
     }
@@ -189,13 +202,13 @@ export class PackageChangeNoticeService {
       const s = n.student;
       const lines = [
         `${s.name} (${n.familyName})`,
-        `  Current package: ${s.package || '—'}`,
-        `  New package: ${this.describePackage(s)}`,
+        `  Current package: ${n.priorPackage}`,
+        `  New package: ${this.describePackage(n.change)}`,
         `  Effective: ${this.formatDate(n.effective)}`,
       ];
-      if (s.pending_schedule && s.pending_schedule.length > 0) {
+      if (n.change.schedule && n.change.schedule.length > 0) {
         lines.push(
-          `  New weekly schedule: ${this.describeSchedule(s.pending_schedule, s, contactsById)}`,
+          `  New weekly schedule: ${this.describeSchedule(n.change.schedule, s, contactsById)}`,
         );
       } else {
         lines.push(
@@ -232,19 +245,19 @@ export class PackageChangeNoticeService {
   }
 
   /** 'Custom ($400/mo, 2×45 min)' or the package name. */
-  private describePackage(s: Student): string {
-    const name = s.pending_package || '—';
+  private describePackage(c: PendingChange): string {
+    const name = c.package || '—';
     if (name !== CUSTOM_PACKAGE) return name;
     const parts: string[] = [];
-    if (s.pending_custom_monthly_cost !== undefined) {
-      parts.push(`$${s.pending_custom_monthly_cost}/mo`);
+    if (c.custom_monthly_cost !== undefined) {
+      parts.push(`$${c.custom_monthly_cost}/mo`);
     }
     if (
-      s.pending_custom_sessions_per_week !== undefined ||
-      s.pending_custom_session_length_min !== undefined
+      c.custom_sessions_per_week !== undefined ||
+      c.custom_session_length_min !== undefined
     ) {
       parts.push(
-        `${s.pending_custom_sessions_per_week ?? '?'}×${s.pending_custom_session_length_min ?? '?'} min`,
+        `${c.custom_sessions_per_week ?? '?'}×${c.custom_session_length_min ?? '?'} min`,
       );
     }
     return parts.length > 0 ? `${name} (${parts.join(', ')})` : name;

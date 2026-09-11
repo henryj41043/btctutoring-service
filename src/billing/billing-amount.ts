@@ -1,4 +1,5 @@
 import { Student } from '../models/student.model';
+import { pendingChangesOf } from '../students/pending-changes';
 import {
   PackageCatalog,
   PackageDef,
@@ -72,26 +73,27 @@ export interface PackageFields {
 }
 
 /**
- * The package fields that govern a given month: the scheduled (pending)
- * change once the viewed month reaches its effective month, else the current
- * package. Lets a future month's billing resolve the new package BEFORE the
- * 1st-of-month cron promotes it. Mirror of the frontend helper.
+ * The package fields that govern a given month: the LATEST scheduled change
+ * whose effective month has been reached by the viewed month, else the
+ * current package. Lets a future month's billing resolve the new package
+ * BEFORE the 1st-of-month cron promotes it. Mirror of the frontend helper.
  */
 export function packageFieldsForMonth(
   student: Student,
   year: number,
   month: number,
 ): PackageFields {
-  if (
-    student.pending_package &&
-    student.pending_package_effective &&
-    student.pending_package_effective.slice(0, 7) <= monthKey(year, month)
-  ) {
+  const key = monthKey(year, month);
+  const reached = pendingChangesOf(student).filter(
+    (c) => c.effective.slice(0, 7) <= key,
+  );
+  const governing = reached[reached.length - 1];
+  if (governing) {
     return {
-      package: student.pending_package,
-      custom_monthly_cost: student.pending_custom_monthly_cost,
-      custom_sessions_per_week: student.pending_custom_sessions_per_week,
-      custom_session_length_min: student.pending_custom_session_length_min,
+      package: governing.package,
+      custom_monthly_cost: governing.custom_monthly_cost,
+      custom_sessions_per_week: governing.custom_sessions_per_week,
+      custom_session_length_min: governing.custom_session_length_min,
     };
   }
   return {
