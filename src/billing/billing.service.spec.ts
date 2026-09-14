@@ -296,4 +296,19 @@ describe('BillingService', () => {
       await expect(service.acquireLock('lock#x')).rejects.toThrow('boom');
     });
   });
+
+  describe('releaseLock', () => {
+    it('deletes the sentinel row', async () => {
+      Model.delete.mockResolvedValue(undefined);
+      await service.releaseLock('lock#horizon#2026-09-13');
+      expect(Model.delete).toHaveBeenCalledWith({
+        id: 'lock#horizon#2026-09-13',
+      });
+    });
+
+    it('swallows and logs a delete failure', async () => {
+      Model.delete.mockRejectedValue(new Error('nope'));
+      await expect(service.releaseLock('lock#x')).resolves.toBeUndefined();
+    });
+  });
 });

@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { randomUUID } from 'crypto';
 import { StudentsService } from '../students/students.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { ContactsService } from '../contacts/contacts.service';
@@ -21,27 +20,20 @@ import {
   siblingDiscountedTotal,
   groupSessionFee,
 } from './billing-amount';
-import { easternSlotToUtc, utcToEasternWall } from './eastern-time';
+import { easternSlotToUtc } from './eastern-time';
 import { STUDENT_STATUS } from '../students/student-status';
 import {
   LEGACY_PENDING_FIELDS,
   planPromotion,
 } from '../students/pending-changes';
+import {
+  buildGroupRollSessions,
+  buildTutoringMonthSessions,
+  PENDING_STATUS,
+} from '../sessions/session-builder';
 
 const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
-const PENDING = 'Pending';
-/** BTC & Me sessions are always exactly 45 minutes (client policy). */
-const GROUP_SESSION_MINUTES = 45;
-/** JS Date.getDay() (0=Sunday) → the stored weekday string. */
-const WEEKDAY_BY_JS_DAY = [
-  'SUNDAY',
-  'MONDAY',
-  'TUESDAY',
-  'WEDNESDAY',
-  'THURSDAY',
-  'FRIDAY',
-  'SATURDAY',
-];
+const PENDING = PENDING_STATUS;
 
 /**
  * Monthly auto-renew: when a new month starts, each active student with
@@ -166,6 +158,27 @@ export class AutoRenewService {
       }
     }
 
+    // One fetch of the [month, month+2) window serves both the existence check
+    // and the group-series roll. A student whose month already holds tutoring
+    // sessions (pre-filled by the daily horizon job) is never regenerated.
+    const windowSessions = await this.fetchWindow(year, month);
+    const nextMonthIso = easternSlotToUtc(
+      year,
+      month + 1,
+      1,
+      '00:00',
+    ).toISOString();
+    const filledStudentIds = new Set(
+      windowSessions
+        .filter(
+          (s) =>
+            s.type === SessionType.TUTORING &&
+            !!s.student_id &&
+            s.start_datetime < nextMonthIso,
+        )
+        .map((s) => s.student_id),
+    );
+
     // Session roll-forward: auto-renew students whose package started in a prior
     // month (the start month's sessions were created when the schedule was set).
     const renewable = activeStudents.filter(
@@ -179,6 +192,7 @@ export class AutoRenewService {
 
     let sessionsCreated = 0;
     for (const student of renewable) {
+      if (filledStudentIds.has(student.id)) continue;
       const monthSessions = this.buildMonthSessions(
         student,
         contacts,
@@ -196,6 +210,7 @@ export class AutoRenewService {
     // the new schedule here (auto_renew still gates generation).
     for (const student of promotedOnTime) {
       if (!student.auto_renew || !student.schedule?.length) continue;
+      if (filledStudentIds.has(student.id)) continue;
       const monthSessions = this.buildMonthSessions(
         student,
         contacts,
@@ -209,7 +224,7 @@ export class AutoRenewService {
     }
 
     // BTC & Me: extend every still-running group series into this month.
-    sessionsCreated += await this.rollGroupSeries(year, month);
+    sessionsCreated += await this.rollGroupSeries(year, month, windowSessions);
 
     // Billing roll-forward: one record set per contact with a renewable
     // student, a BTC & Me enrollee (group-only families still owe the flat
@@ -281,6 +296,16 @@ export class AutoRenewService {
     return { sessionsCreated, billingRecords, skipped: false };
   }
 
+  /** The sessions of the Eastern-bounded [month, month+2) window. */
+  private async fetchWindow(year: number, month: number): Promise<Session[]> {
+    const windowStart = easternSlotToUtc(year, month, 1, '00:00');
+    const windowEnd = easternSlotToUtc(year, month + 2, 1, '00:00');
+    return (await this.sessions.getAllSessions({
+      from: windowStart.toISOString(),
+      to: windowEnd.toISOString(),
+    })) as unknown as Session[];
+  }
+
   /**
    * Rolls every still-running "BTC & Me" group series one month forward:
    * a series with at least one PENDING session in the new current month gets
@@ -290,16 +315,12 @@ export class AutoRenewService {
    * so the series simply never rolls again. Returns the number of sessions
    * created.
    */
-  private async rollGroupSeries(year: number, month: number): Promise<number> {
-    // Eastern month boundaries; sessions store UTC ISO strings.
-    const windowStart = easternSlotToUtc(year, month, 1, '00:00');
+  private async rollGroupSeries(
+    year: number,
+    month: number,
+    all: Session[],
+  ): Promise<number> {
     const nextMonthStart = easternSlotToUtc(year, month + 1, 1, '00:00');
-    const windowEnd = easternSlotToUtc(year, month + 2, 1, '00:00');
-    const all = (await this.sessions.getAllSessions({
-      from: windowStart.toISOString(),
-      to: windowEnd.toISOString(),
-    })) as unknown as Session[];
-
     const groupSessions = all.filter(
       (s) => s.type === SessionType.GROUP && s.series_id && s.start_datetime,
     );
@@ -326,31 +347,7 @@ export class AutoRenewService {
       const latest = sessions.reduce((a, b) =>
         a.start_datetime > b.start_datetime ? a : b,
       );
-      // Carry the Eastern wall time, not the UTC offset — a series created in
-      // EDT must stay at (e.g.) 5pm Eastern after the November transition.
-      const wall = utcToEasternWall(new Date(latest.start_datetime));
-      const nextSessions: Session[] = [];
-      // month + 1 may overflow into January — Date/Date.UTC normalize it.
-      const daysInNextMonth = new Date(year, month + 2, 0).getDate();
-      for (let day = 1; day <= daysInNextMonth; day++) {
-        const date = new Date(year, month + 1, day);
-        if (WEEKDAY_BY_JS_DAY[date.getDay()] !== wall.weekday) continue;
-        const start = easternSlotToUtc(year, month + 1, day, wall.time);
-        nextSessions.push({
-          type: SessionType.GROUP,
-          start_datetime: start.toISOString(),
-          end_datetime: new Date(
-            start.getTime() + GROUP_SESSION_MINUTES * 60000,
-          ).toISOString(),
-          status: PENDING,
-          notes: '',
-          student_name: latest.student_name,
-          tutor_id: latest.tutor_id,
-          tutor_name: latest.tutor_name,
-          series_id: seriesId,
-          participants: latest.participants,
-        } as Session);
-      }
+      const nextSessions = buildGroupRollSessions(latest, year, month + 1);
       if (nextSessions.length > 0) {
         await this.sessions.createSessions(nextSessions);
         created += nextSessions.length;
@@ -392,56 +389,13 @@ export class AutoRenewService {
     year: number,
     month: number,
   ): Session[] {
-    const sessions: Session[] = [];
-    // One series per EFFECTIVE tutor (slot override or the assigned tutor):
-    // series-scoped edits/deletes must never touch another tutor's sessions.
-    const byTutor = new Map<string, { seriesId: string; name: string }>();
-    const tutorEntry = (tutorId: string) => {
-      let entry = byTutor.get(tutorId);
-      if (!entry) {
-        entry = {
-          seriesId: randomUUID(),
-          name: contacts.find((c) => c.id === tutorId)?.first_name ?? '',
-        };
-        byTutor.set(tutorId, entry);
-      }
-      return entry;
-    };
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    for (const slot of student.schedule ?? []) {
-      const effTutorId = slot.tutor_id ?? student.assigned_tutor_id;
-      const entry = tutorEntry(effTutorId);
-      for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(year, month, day);
-        if (WEEKDAY_BY_JS_DAY[date.getDay()] !== slot.weekday) continue;
-        sessions.push({
-          type: SessionType.TUTORING,
-          // Slot times are Eastern wall times; the container clock is UTC, so
-          // the conversion must be explicit (ambient setHours generated the
-          // 4-5h-early sessions this replaces).
-          start_datetime: easternSlotToUtc(
-            year,
-            month,
-            day,
-            slot.start_time,
-          ).toISOString(),
-          end_datetime: easternSlotToUtc(
-            year,
-            month,
-            day,
-            slot.end_time,
-          ).toISOString(),
-          status: PENDING,
-          notes: '',
-          student_id: student.id,
-          student_name: student.name,
-          tutor_id: effTutorId,
-          tutor_name: entry.name,
-          series_id: entry.seriesId,
-        } as Session);
-      }
-    }
-    return sessions;
+    return buildTutoringMonthSessions({
+      student,
+      slots: student.schedule ?? [],
+      tutorNameById: (id) => contacts.find((c) => c.id === id)?.first_name,
+      year,
+      month,
+    });
   }
 
   private periodKey(year: number, month: number, day: number): string {
