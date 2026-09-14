@@ -817,6 +817,53 @@ describe('AutoRenewService', () => {
         from: '2026-07-01T04:00:00.000Z', // Jul 1 midnight EDT
         to: '2026-09-01T04:00:00.000Z', // Sep 1 midnight EDT
       });
+      expect(sessions.getAllSessions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('months pre-filled by the horizon job', () => {
+    const julyTutoring = (over: Record<string, unknown> = {}) => ({
+      id: 'x-1',
+      type: 'TUTORING',
+      status: 'Pending',
+      student_id: 's-1',
+      tutor_id: 't-1',
+      series_id: 'ser-1',
+      start_datetime: '2026-07-06T14:00:00.000Z',
+      end_datetime: '2026-07-06T14:30:00.000Z',
+      ...over,
+    });
+
+    it('does not regenerate a renewable student whose month already has tutoring sessions, but still bills', async () => {
+      sessions.getAllSessions.mockResolvedValue([julyTutoring()]);
+      const result = await service.runAutoRenew(july);
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+      expect(result.sessionsCreated).toBe(0);
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalled();
+    });
+
+    it('still generates when the existing sessions belong to next month or another student', async () => {
+      sessions.getAllSessions.mockResolvedValue([
+        julyTutoring({ start_datetime: '2026-08-03T14:00:00.000Z' }),
+        julyTutoring({ id: 'x-2', student_id: 's-9' }),
+        julyTutoring({ id: 'x-3', type: 'MAKE_UP' }),
+      ]);
+      const result = await service.runAutoRenew(july);
+      expect(result.sessionsCreated).toBe(9);
+    });
+
+    it('does not regenerate a just-promoted student whose month is already filled', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          package_start_date: '2026-07-01T00:00:00',
+          pending_changes: [{ package: 'Excel', effective: '2026-07-01' }],
+        }),
+      ]);
+      sessions.getAllSessions.mockResolvedValue([julyTutoring()]);
+      const result = await service.runAutoRenew(july);
+      expect(students.promotePendingChanges).toHaveBeenCalled();
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+      expect(result.sessionsCreated).toBe(0);
     });
   });
 });

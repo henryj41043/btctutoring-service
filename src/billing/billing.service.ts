@@ -124,6 +124,17 @@ export class BillingService {
   }
 
   /**
+   * Deletes a lock sentinel (used by the daily horizon fill to drop the
+   * previous day's key so lock rows never accumulate). Best effort: a failure
+   * is logged, never surfaced — the lock's job is already done.
+   */
+  async releaseLock(lockId: string): Promise<void> {
+    await BillingModel.delete({ id: lockId }).catch((error: Error) => {
+      Logger.error(`Failed to release lock ${lockId}: ${error.message}`, error);
+    });
+  }
+
+  /**
    * Creates or overwrites a contact's billing record for a period. The full
    * intended state (amount + paid status) is supplied by the caller; the
    * deterministic id makes this a safe PutItem upsert.
