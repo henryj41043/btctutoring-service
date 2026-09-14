@@ -362,6 +362,31 @@ describe('SessionsService', () => {
       delete process.env.SES_FROM_EMAIL;
     });
 
+    it('sends a branded HTML alternative with the notes escaped and line breaks kept', async () => {
+      Model.get.mockResolvedValue(
+        completed({
+          notes: 'Reviewed <fractions> & decimals.\nHomework: p. 12',
+        }),
+      );
+      await service.emailSessionNotes('session-1');
+      const send = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+      const html = send.Message?.Body?.Html?.Data ?? '';
+      expect(send.Message?.Body?.Html?.Charset).toBe('UTF-8');
+      expect(html).toContain(
+        'https://btchub.bitshiftstudio.io/assets/BTC_Transparent_BG.png',
+      );
+      expect(html).toContain('Session notes for Pat</h1>');
+      expect(html).toContain('Hi Jane,');
+      expect(html).toContain(
+        'Reviewed &lt;fractions&gt; &amp; decimals.<br>Homework: p. 12',
+      );
+      expect(html).not.toContain('<fractions>');
+      // The text alternative carries the raw notes.
+      expect(send.Message?.Body?.Text?.Data).toContain(
+        'Reviewed <fractions> & decimals.\nHomework: p. 12',
+      );
+    });
+
     it('emails the stored notes to the family and stamps notes_emailed_at', async () => {
       const result = await service.emailSessionNotes('session-1');
       expect(result.message).toBe('Session notes emailed.');
@@ -378,6 +403,9 @@ describe('SessionsService', () => {
         'Great progress on fractions today.',
       );
       expect(send.Message?.Body?.Text?.Data).toContain('with Tess');
+      expect(send.Message?.Body?.Text?.Data).toContain(
+        '— Beyond the Chalkboard Tutoring',
+      );
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'session-1' },
         { notes_emailed_at: expect.any(String) },

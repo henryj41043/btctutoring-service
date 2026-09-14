@@ -13,6 +13,7 @@ import { Session } from '../models/session.model';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
+import { brandedEmail } from '../notifications/email-template';
 
 /** Optional start_datetime range (ISO strings; ISO sorts lexically). */
 export interface SessionRange {
@@ -53,7 +54,7 @@ export class SessionsService {
 
   /**
    * Emails the session's notes to the student's parent (opt-in from the
-   * dialog after attendance is completed). Sends the STORED notes — callers
+   * dialog when taking attendance). Sends the STORED notes — callers
    * persist their edit first, then request the send. Stamps notes_emailed_at
    * for display, but deliberate re-sends are allowed (a tutor may amend the
    * notes and email again).
@@ -103,16 +104,16 @@ export class SessionsService {
       day: 'numeric',
       year: 'numeric',
     }).format(new Date(session.start_datetime));
-    const body = [
-      `Hi ${contact.first_name || 'there'},`,
-      ``,
-      `Here are the notes from ${studentName}'s session on ${sessionDate}` +
+    // Branded HTML (logo, brand colours) + a plain-text alternative built
+    // from the same parts; the notes are escaped, line breaks preserved.
+    const body = brandedEmail({
+      title: `Session notes for ${studentName}`,
+      greeting: `Hi ${contact.first_name || 'there'},`,
+      intro:
+        `Here are the notes from ${studentName}'s session on ${sessionDate}` +
         `${session.tutor_name ? ` with ${session.tutor_name}` : ''}:`,
-      ``,
-      notes,
-      ``,
-      `— Beyond the Chalkboard Tutoring`,
-    ].join('\n');
+      body: notes,
+    });
 
     await this.ses
       .send(
@@ -124,7 +125,7 @@ export class SessionsService {
               Data: `Session notes for ${studentName} — ${sessionDate}`,
               Charset: 'UTF-8',
             },
-            Body: { Text: { Data: body, Charset: 'UTF-8' } },
+            Body: body,
           },
         }),
       )
