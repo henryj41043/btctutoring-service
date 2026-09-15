@@ -153,12 +153,14 @@ describe('ContactsService', () => {
   });
 
   describe('getAdminContacts', () => {
-    it('scans for Admins user_group and paginates fully', async () => {
+    it('scans for CURRENT admins (Admins group + current staff) and paginates fully', async () => {
       const admins = [sampleContact({ user_group: 'Admins' })];
       const chain = scanResolves(Model, admins);
       await expect(service.getAdminContacts()).resolves.toBe(admins);
       expect(Model.scan).toHaveBeenCalledWith({
         user_group: { eq: 'Admins' },
+        service: { eq: 'Hiring' },
+        status: { eq: 'Staff' },
       });
       expect(chain.all).toHaveBeenCalled();
     });

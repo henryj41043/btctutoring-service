@@ -84,10 +84,17 @@ export class ContactsService {
     }
   }
 
-  /** Admin users (user_group=Admins) — reminder digest recipients. */
+  /**
+   * CURRENT admins (user_group=Admins AND current staff: service=Hiring,
+   * status=Staff) — the reminder digest recipients. Former staff and
+   * employment inquiries may still carry the group; they must never receive
+   * admin email (client 2026-09-14). See isCurrentAdmin.
+   */
   async getAdminContacts() {
     return ContactsModel.scan({
       user_group: { eq: 'Admins' },
+      service: { eq: 'Hiring' },
+      status: { eq: 'Staff' },
     })
       .all()
       .exec()

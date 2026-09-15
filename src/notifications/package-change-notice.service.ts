@@ -4,6 +4,7 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { ContactsService } from '../contacts/contacts.service';
 import { StudentsService } from '../students/students.service';
 import { Contact } from '../models/contact.model';
+import { isCurrentAdmin } from '../models/user-groups';
 import { PendingChange, ScheduleSlot, Student } from '../models/student.model';
 import { pendingChangesOf } from '../students/pending-changes';
 import { CUSTOM_PACKAGE } from '../billing/package-config';
@@ -122,7 +123,8 @@ export class PackageChangeNoticeService {
       if (!id) return;
       byRecipient.set(id, [...(byRecipient.get(id) ?? []), notice]);
     };
-    const admins = contacts.filter((c) => c.user_group === 'Admins');
+    // Current admins only — former staff / inquiries may still carry the group.
+    const admins = contacts.filter(isCurrentAdmin);
     for (const notice of notices) {
       for (const admin of admins) add(admin.id, notice);
       for (const tutorId of notice.tutorIds) add(tutorId, notice);

@@ -18,7 +18,10 @@ const NOW = new Date('2026-09-10T13:00:00Z');
 
 const contact = (over: Partial<Contact>): Contact =>
   ({ first_name: 'X', last_name: 'Y', ...over }) as Contact;
+/** Current staff fields every real admin carries (the notice filters on them). */
+const STAFF = { service: 'Hiring', status: 'Staff' } as Partial<Contact>;
 const adminA = contact({
+  ...STAFF,
   id: 'admin-a',
   first_name: 'Ada',
   last_name: 'Admin',
@@ -26,10 +29,21 @@ const adminA = contact({
   user_group: 'Admins',
 });
 const adminNoEmail = contact({
+  ...STAFF,
   id: 'admin-b',
   first_name: 'Bo',
   last_name: 'Blank',
   user_group: 'Admins',
+});
+/** Carries the Admins group but is no longer staff — must never be notified. */
+const formerAdmin = contact({
+  id: 'admin-former',
+  first_name: 'Fay',
+  last_name: 'Former',
+  email: 'fay@x.com',
+  user_group: 'Admins',
+  service: 'Hiring',
+  status: 'Former Staff',
 });
 const tutor1 = contact({
   id: 't-1',
@@ -114,6 +128,21 @@ describe('PackageChangeNoticeService', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it('never notifies an Admins-group contact who is no longer current staff', async () => {
+    contactsService.getContacts.mockResolvedValue([
+      adminA,
+      formerAdmin,
+      tutor1,
+    ] as never);
+    studentsService.getStudents.mockResolvedValue([
+      student({ pending_changes: [change({})] }),
+    ] as never);
+    await service.sendPackageChangeNotices();
+    const recipients = sentEmails().map((i) => i.Destination?.ToAddresses?.[0]);
+    expect(recipients).toContain('ada@x.com');
+    expect(recipients).not.toContain('fay@x.com');
   });
 
   it('announces a change due within 14 days to every admin and the effective tutors, then stamps it', async () => {
@@ -397,6 +426,7 @@ describe('PackageChangeNoticeService', () => {
   it('falls back to a full name / Unknown for sparse contacts and skips unknown weekday labels gracefully', async () => {
     contactsService.getContacts.mockResolvedValue([
       contact({
+        ...STAFF,
         id: 'admin-a',
         first_name: '',
         last_name: 'Admin',
