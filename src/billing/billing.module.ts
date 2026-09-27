@@ -4,6 +4,7 @@ import { BillingController } from './billing.controller';
 import { AutoRenewService } from './auto-renew.service';
 import { SessionHorizonService } from './session-horizon.service';
 import { SessionHorizonController } from './session-horizon.controller';
+import { ServiceEndService } from './service-end.service';
 import { StatementService } from './statement.service';
 import { StatementController } from './statement.controller';
 import { StudentsModule } from '../students/students.module';
@@ -23,6 +24,7 @@ import { PackagesModule } from '../packages/packages.module';
     AutoRenewService,
     SessionHorizonService,
     StatementService,
+    ServiceEndService,
   ],
   exports: [BillingService],
 })

@@ -9,6 +9,8 @@ import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
 import { easternSlotToUtc } from './eastern-time';
 import { monthKey } from './billing-amount';
+import { ServiceEndService } from './service-end.service';
+import { keyOf } from './statement-engine';
 import { STUDENT_STATUS } from '../students/student-status';
 import {
   buildGroupRollSessions,
@@ -58,6 +60,7 @@ export class SessionHorizonService {
     private readonly sessions: SessionsService,
     private readonly contacts: ContactsService,
     private readonly billing: BillingService,
+    private readonly serviceEnd: ServiceEndService,
   ) {}
 
   // 07:00 UTC daily — an hour after the 1st-of-month promotion run.
@@ -84,6 +87,14 @@ export class SessionHorizonService {
         this.logger.log(`Horizon fill for ${dayKey} already done; skipping.`);
         return { ...result, lockedOut: true };
       }
+    }
+
+    if (opts.lock) {
+      // Ended students leave Active (and lose their later sessions) BEFORE
+      // the fill decides who is eligible. A failure never blocks the fill.
+      await this.serviceEnd.applyServiceEnds(now).catch((err: Error) => {
+        this.logger.error(`Service ends failed: ${err.message}`);
+      });
     }
 
     const year = now.getFullYear();
@@ -159,6 +170,8 @@ export class SessionHorizonService {
       if (!this.isEligible(student)) continue;
       const start = new Date(student.package_start_date!);
       const startKey = monthKey(start.getFullYear(), start.getMonth());
+      // The last day of service: nothing is generated past it.
+      const endDate = keyOf(student.service_end_date);
       const months = tutoringMonths.get(student.id!) ?? new Set<number>();
       const seriesIdByTutor = new Map<string, string>(
         [
@@ -171,6 +184,7 @@ export class SessionHorizonService {
           const target = normalizeMonth(year, month + i);
           const key = monthKey(target.year, target.month);
           if (key < startKey) continue;
+          if (endDate && key > endDate.slice(0, 7)) continue;
           if (months.has(i)) continue;
           const slots = governingSlotsForMonth(student, `${key}-01`);
           if (slots === null) {
@@ -184,6 +198,7 @@ export class SessionHorizonService {
             year: target.year,
             month: target.month,
             notBefore: key === startKey ? start : undefined,
+            notAfter: endDate,
             seriesIdByTutor,
           });
           if (built.length === 0) continue;

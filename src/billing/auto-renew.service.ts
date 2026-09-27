@@ -8,18 +8,8 @@ import { PackagesService } from '../packages/packages.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
-import {
-  CUSTOM_PACKAGE,
-  PackageCatalog,
-  resolvePackageDef,
-  round2,
-} from './package-config';
-import { semiMonthlySplit } from './proration';
-import {
-  studentMonthlyCharge,
-  siblingDiscountedTotal,
-  groupSessionFee,
-} from './billing-amount';
+import { CUSTOM_PACKAGE } from './package-config';
+import { buildStatement, keyOf } from './statement-engine';
 import { easternSlotToUtc } from './eastern-time';
 import { STUDENT_STATUS } from '../students/student-status';
 import {
@@ -99,7 +89,15 @@ export class AutoRenewService {
     const students = studentsRes as unknown as Student[];
     const contacts = contactsRes as unknown as Contact[];
 
-    const activeStudents = students.filter((s) => s.status === ACTIVE_STUDENT);
+    const monthStartDay = `${this.monthKey(year, month)}-01`;
+    // A student whose last day of service fell before this month is done,
+    // even if the daily job has not moved them out of Active yet (it runs
+    // an hour after this one).
+    const activeStudents = students.filter((s) => {
+      if (s.status !== ACTIVE_STUDENT) return false;
+      const end = keyOf(s.service_end_date);
+      return !end || end >= monthStartDay;
+    });
     const monthStart = new Date(year, month, 1);
 
     // Scheduled package changes: promote every due pending change BEFORE the
@@ -241,51 +239,26 @@ export class AutoRenewService {
       const contactStudents = activeStudents.filter(
         (s) => s.contact_id === contactId,
       );
-      const preDiscount = round2(
-        contactStudents.reduce(
-          (sum, s) => sum + studentMonthlyCharge(s, year, month, catalog),
-          0,
-        ),
+      // The statement engine is the single source of the amounts (custom
+      // prices, discounts, a prorated final month, the flat group fee).
+      const statement = buildStatement(
+        contact,
+        contactStudents,
+        [],
+        year,
+        month,
+        catalog,
       );
-      const enrolledCount = contactStudents.filter((s) =>
-        this.isEnrolled(s, catalog),
-      ).length;
-      const total = siblingDiscountedTotal(
-        preDiscount,
-        contact.sibling_discount,
-        enrolledCount,
-      );
-      // The flat group fee is never sibling-discounted and never prorated —
-      // added after the discount, in full (client policy).
-      const groupFee = groupSessionFee(contactStudents);
-      if (total + groupFee <= 0) continue;
-
-      if (this.isSemiMonthly(contact.billing_cycle)) {
-        // Only the package total splits across the halves; the flat fee lands
-        // on the 1st (always > 0 here, since total + fee > 0 and any positive
-        // total puts its larger half first). A fee-only family gets just the
-        // day-1 record.
-        const [first, second] = semiMonthlySplit(total);
+      if (!statement || statement.total <= 0) continue;
+      for (const due of statement.dues) {
+        // A half with nothing due (a fee-only family's 15th, the blank side
+        // of a prorated month) gets no record.
+        if (due.derived <= 0) continue;
         billingRecords += await this.createRecord(
           contactId,
-          this.periodKey(year, month, 1),
-          'semi_monthly',
-          round2(first + groupFee),
-        );
-        if (second > 0) {
-          billingRecords += await this.createRecord(
-            contactId,
-            this.periodKey(year, month, 15),
-            'semi_monthly',
-            second,
-          );
-        }
-      } else {
-        billingRecords += await this.createRecord(
-          contactId,
-          this.periodKey(year, month, 1),
-          'monthly',
-          round2(total + groupFee),
+          due.period_start,
+          statement.cycle,
+          due.derived,
         );
       }
     }
@@ -356,17 +329,6 @@ export class AutoRenewService {
     return created;
   }
 
-  /** True when a student has a resolvable package — i.e. is enrolled and billable. */
-  private isEnrolled(student: Student, catalog: PackageCatalog): boolean {
-    return (
-      resolvePackageDef(student.package, catalog, {
-        monthlyCost: student.custom_monthly_cost,
-        sessionsPerWeek: student.custom_sessions_per_week,
-        sessionLengthMin: student.custom_session_length_min,
-      }) !== null
-    );
-  }
-
   private async createRecord(
     contactId: string,
     period: string,
@@ -395,18 +357,11 @@ export class AutoRenewService {
       tutorNameById: (id) => contacts.find((c) => c.id === id)?.first_name,
       year,
       month,
+      notAfter: keyOf(student.service_end_date),
     });
-  }
-
-  private periodKey(year: number, month: number, day: number): string {
-    return `${this.monthKey(year, month)}-${day.toString().padStart(2, '0')}`;
   }
 
   private monthKey(year: number, month: number): string {
     return `${year}-${(month + 1).toString().padStart(2, '0')}`;
-  }
-
-  private isSemiMonthly(cycle: string | undefined): boolean {
-    return cycle === 'semi_monthly' || cycle === 'biweekly';
   }
 }

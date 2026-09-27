@@ -130,6 +130,31 @@ describe('session-builder', () => {
       expect(build({ notBefore: new Date(2026, 5, 15) })).toHaveLength(9);
     });
 
+    it('skips days after notAfter, keeping the day itself', () => {
+      // Mon 6,13 + Wed 1,8,15
+      const out = build({ notAfter: '2026-07-15' });
+      expect(out).toHaveLength(5);
+      expect(out.some((s) => s.start_datetime.startsWith('2026-07-15'))).toBe(
+        true,
+      );
+      expect(out.every((s) => s.start_datetime < '2026-07-16')).toBe(true);
+    });
+
+    it('notAfter in a later month keeps the month; an earlier one empties it', () => {
+      expect(build({ notAfter: '2026-08-02' })).toHaveLength(9);
+      expect(build({ notAfter: '2026-07-31' })).toHaveLength(9);
+      expect(build({ notAfter: '2026-06-30' })).toHaveLength(0);
+      // Single-digit days compare correctly as padded keys.
+      expect(build({ notAfter: '2026-07-09' })).toHaveLength(3);
+    });
+
+    it('combines notBefore and notAfter', () => {
+      // Wed 15, Mon 20, Wed 22
+      expect(
+        build({ notBefore: new Date(2026, 6, 15), notAfter: '2026-07-22' }),
+      ).toHaveLength(3);
+    });
+
     it('reuses a supplied series id per tutor and mints one otherwise', () => {
       const reused = build({ seriesIdByTutor: new Map([['t-1', 'series-A']]) });
       expect(reused.every((s) => s.series_id === 'series-A')).toBe(true);

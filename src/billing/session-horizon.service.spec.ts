@@ -61,6 +61,7 @@ describe('SessionHorizonService', () => {
   // Sep 14 2026 → fills Oct, Nov, Dec.
   // Oct: Mon 5,12,19,26 + Wed 7,14,21,28 = 8; Nov: Mon 2,9,16,23,30 + Wed 4,11,18,25 = 9;
   // Dec: Mon 7,14,21,28 + Wed 2,9,16,23,30 = 9 → 26.
+  const serviceEnd = { applyServiceEnds: jest.fn() };
   const now = new Date(2026, 8, 14, 7, 0, 0);
   const allCreated = (): Session[] =>
     sessions.createSessions.mock.calls.flatMap((c) => c[0] as Session[]);
@@ -74,7 +75,12 @@ describe('SessionHorizonService', () => {
       sessions as any,
       contacts as any,
       billing as any,
+      serviceEnd as any,
     );
+    serviceEnd.applyServiceEnds.mockResolvedValue({
+      studentsEnded: 0,
+      sessionsDeleted: 0,
+    });
     billing.acquireLock.mockResolvedValue(true);
     billing.releaseLock.mockResolvedValue(undefined);
     sessions.createSessions.mockResolvedValue({});
@@ -397,5 +403,62 @@ describe('SessionHorizonService', () => {
     const result = await service.fillHorizon(now);
     expect(result.studentsFilled).toBe(1);
     expect(result.sessionsCreated).toBe(26);
+  });
+
+  describe('service end date', () => {
+    it('applies service ends before the locked daily fill, never on manual fills', async () => {
+      await service.fillHorizon(now, { lock: true });
+      expect(serviceEnd.applyServiceEnds).toHaveBeenCalledWith(now);
+      expect(
+        serviceEnd.applyServiceEnds.mock.invocationCallOrder[0],
+      ).toBeLessThan(students.getStudents.mock.invocationCallOrder[0]);
+      serviceEnd.applyServiceEnds.mockClear();
+      await service.fillHorizon(now, { lock: false });
+      await service.fillHorizon(now, { studentId: 's-1' });
+      expect(serviceEnd.applyServiceEnds).not.toHaveBeenCalled();
+    });
+
+    it('skips service ends when the day is locked out', async () => {
+      billing.acquireLock.mockResolvedValue(false);
+      await service.fillHorizon(now, { lock: true });
+      expect(serviceEnd.applyServiceEnds).not.toHaveBeenCalled();
+    });
+
+    it('a service-end failure never blocks the fill', async () => {
+      serviceEnd.applyServiceEnds.mockRejectedValue(new Error('boom'));
+      const res = await service.fillHorizon(now, { lock: true });
+      expect(res.sessionsCreated).toBe(26);
+    });
+
+    it('stops generating at the end date', async () => {
+      // Ends Wed Nov 11: Oct 8 + Nov (Mon 2, 9 + Wed 4, 11) 4 = 12; no Dec.
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-11-11' }),
+      ]);
+      const res = await service.fillHorizon(now);
+      expect(res.sessionsCreated).toBe(12);
+      const starts = allCreated().map((s) => s.start_datetime);
+      expect(starts.every((iso) => iso < '2026-11-12T05:00:00.000Z')).toBe(
+        true,
+      );
+      expect(starts.some((iso) => iso.startsWith('2026-11-11'))).toBe(true);
+    });
+
+    it('an end date on the last day of a month keeps that month whole', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-10-31' }),
+      ]);
+      const res = await service.fillHorizon(now);
+      expect(res.sessionsCreated).toBe(8);
+    });
+
+    it('an end date in the current month generates nothing ahead', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-09-30' }),
+      ]);
+      const res = await service.fillHorizon(now);
+      expect(res.sessionsCreated).toBe(0);
+      expect(res.studentsFilled).toBe(0);
+    });
   });
 });

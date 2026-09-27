@@ -111,9 +111,9 @@ export class Student {
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
   mid_month_change_period?: string;
   /** 'YYYY-MM-DD' last day of service (inclusive); the final month prorates to it. */
-  service_end_date?: string;
+  service_end_date?: string | null;
   /** The status applied by the daily job once service_end_date has passed. */
-  end_status?: string;
+  end_status?: string | null;
   /** Monthly price replacing the package's price for this student (null on save = clear). */
   price_override?: number | null;
   /** Percent (0-100) taken off this student's package charge (null or 0 on save = clear). */

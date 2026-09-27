@@ -837,6 +837,131 @@ describe('StudentsService', () => {
       });
     });
 
+    describe('service end date', () => {
+      const lastUpdate = () => Model.update.mock.calls.at(-1)![1];
+
+      it('persists an end date with its end status', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          service_end_date: '2026-10-15',
+          end_status: 'MIA',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          service_end_date: '2026-10-15',
+          end_status: 'MIA',
+        });
+      });
+
+      it('never stores an end status without an end date', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          end_status: 'MIA',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({});
+      });
+
+      it('a null end date clears it with its end status', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          service_end_date: null,
+          end_status: 'MIA',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          $SET: {},
+          $REMOVE: ['service_end_date', 'end_status'],
+        });
+      });
+
+      it('a null end status alone is removed', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          service_end_date: '2026-10-15',
+          end_status: null,
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          $SET: { service_end_date: '2026-10-15' },
+          $REMOVE: ['end_status'],
+        });
+      });
+
+      it.each([
+        ['2026-10-15T00:00:00'],
+        ['10/15/2026'],
+        ['2026-13-40'],
+        ['x2026-10-15'],
+        [''],
+        [20261015],
+      ])('rejects the end date %p before writing', async (end) => {
+        await expect(
+          service.updateStudent({
+            id: 's-1',
+            service_end_date: end,
+          } as unknown as Student),
+        ).rejects.toThrow(
+          'service_end_date must be formatted YYYY-MM-DD, or null to clear.',
+        );
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+
+      it.each([['Active Student'], ['Onboarding'], ['Gone'], [''], [5]])(
+        'rejects the end status %p before writing',
+        async (status) => {
+          await expect(
+            service.updateStudent({
+              id: 's-1',
+              service_end_date: '2026-10-15',
+              end_status: status,
+            } as unknown as Student),
+          ).rejects.toThrow(
+            'end_status must be one of: Past Student, MIA, Declined Services.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('createStudent validates the same fields', async () => {
+        await expect(
+          service.createStudent({
+            name: 'Pat',
+            service_end_date: 'tomorrow',
+          } as unknown as Student),
+        ).rejects.toThrow('service_end_date must be formatted YYYY-MM-DD');
+      });
+    });
+
+    describe('applyServiceEnd', () => {
+      it.each([
+        ['MIA', 'MIA'],
+        ['Declined Services', 'Declined Services'],
+        ['Past Student', 'Past Student'],
+        [undefined, 'Past Student'],
+        [null, 'Past Student'],
+        ['Active Student', 'Past Student'],
+      ])('end status %p moves the student to %s', async (end, expected) => {
+        Model.update.mockResolvedValue({});
+        const status = await service.applyServiceEnd({
+          id: 's-1',
+          end_status: end,
+        } as unknown as Student);
+        expect(status).toBe(expected);
+        expect(Model.update).toHaveBeenCalledWith(
+          { id: 's-1' },
+          { status: expected },
+        );
+      });
+
+      it('rejects when the update fails', async () => {
+        Model.update.mockRejectedValue(new Error('boom'));
+        await expect(
+          service.applyServiceEnd({ id: 's-1' } as unknown as Student),
+        ).rejects.toThrow('boom');
+      });
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
