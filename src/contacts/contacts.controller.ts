@@ -16,7 +16,7 @@ import { ContactsService } from './contacts.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
-import { Contact } from '../models/contact.model';
+import { CONTACT_ADDRESS_FIELDS, Contact } from '../models/contact.model';
 import { isTutorLike } from '../models/user-groups';
 
 @Controller('contacts')
@@ -46,7 +46,11 @@ export class ContactsController {
     } else if (id && id === user.contact) {
       // Any authenticated user may fetch their own contact record.
       // This is required by the login flow to load the user's profile.
-      return this.contactsService.getContact(id);
+      // Mailing addresses are admin-only data, even on one's own record.
+      const own = (await this.contactsService.getContact(
+        id,
+      )) as unknown as Record<string, unknown>[];
+      return own.map((record) => ContactsController.withoutAddress(record));
     } else if (staff === 'true' && isTutorLike(user.groups ?? [])) {
       // Tutors get a names-only staff list (for resolving tutor display
       // names) — never full records, which carry pay rates.
@@ -64,6 +68,19 @@ export class ContactsController {
       Logger.error('User not authorized to get contacts');
       throw new ForbiddenException('Unauthorized');
     }
+  }
+
+  /** A plain copy of a contact record with the mailing address removed. */
+  private static withoutAddress(
+    record: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const source = record as { toJSON?: () => Record<string, unknown> };
+    const plain: Record<string, unknown> =
+      typeof source.toJSON === 'function' ? source.toJSON() : { ...record };
+    for (const field of CONTACT_ADDRESS_FIELDS) {
+      delete plain[field];
+    }
+    return plain;
   }
 
   @Post()

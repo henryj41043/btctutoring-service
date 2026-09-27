@@ -92,6 +92,53 @@ describe('ContactsController', () => {
       expect(service.getStaffContacts).not.toHaveBeenCalled();
     });
 
+    it('never returns the mailing address to a non-admin (own record included)', async () => {
+      service.getContact.mockResolvedValue([
+        {
+          id: 'contact-tutor',
+          first_name: 'Tess',
+          address_line1: '1 Main St',
+          address_line2: 'Apt 2',
+          city: 'Scranton',
+          state: 'PA',
+          zip: '18503',
+        },
+      ] as never);
+      const res = (await controller.getContacts(
+        reqAs(tutor),
+        'contact-tutor',
+        '',
+        '',
+      )) as Record<string, unknown>[];
+      expect(res).toEqual([{ id: 'contact-tutor', first_name: 'Tess' }]);
+    });
+
+    it('strips the address from a dynamoose item via toJSON', async () => {
+      service.getContact.mockResolvedValue([
+        {
+          toJSON: () => ({
+            id: 'contact-tutor',
+            city: 'Scranton',
+            zip: '18503',
+          }),
+        },
+      ] as never);
+      const res = (await controller.getContacts(
+        reqAs(tutor),
+        'contact-tutor',
+        '',
+        '',
+      )) as Record<string, unknown>[];
+      expect(res).toEqual([{ id: 'contact-tutor' }]);
+    });
+
+    it('returns the mailing address to an admin', async () => {
+      const full = [{ id: 'c-1', address_line1: '1 Main St', zip: '18503' }];
+      service.getContact.mockResolvedValue(full as never);
+      const res = await controller.getContacts(reqAs(admin), 'c-1', '', '');
+      expect(res).toBe(full);
+    });
+
     it('non-admin may fetch their own contact', async () => {
       service.getContact.mockResolvedValue([contact] as never);
       await controller.getContacts(reqAs(tutor), 'contact-tutor', '', '');

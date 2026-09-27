@@ -9,6 +9,12 @@ export const ContactsSchema = new dynamoose.Schema({
   last_name: String,
   email: String,
   phone_number: String,
+  // Mailing address (admin-only; never returned to non-admins).
+  address_line1: String,
+  address_line2: String,
+  city: String,
+  state: String,
+  zip: String,
   service: String,
   status: String,
   monthly_charge: Number,

@@ -220,6 +220,29 @@ describe('ContactsService', () => {
       });
     });
 
+    it('stores the mailing address', async () => {
+      scanResolves(Model, []);
+      Model.__save.mockResolvedValue(undefined);
+      await service.createContact(
+        sampleContact({
+          address_line1: '1 Main St',
+          address_line2: 'Apt 2',
+          city: 'Scranton',
+          state: 'PA',
+          zip: '18503',
+        }),
+      );
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({
+          address_line1: '1 Main St',
+          address_line2: 'Apt 2',
+          city: 'Scranton',
+          state: 'PA',
+          zip: '18503',
+        }),
+      );
+    });
+
     it('saves a new contact and returns a generated id', async () => {
       scanResolves(Model, []); // duplicate-email check finds nothing
       Model.__save.mockResolvedValue(undefined);
@@ -338,6 +361,28 @@ describe('ContactsService', () => {
         }),
       );
       expect(result).toBe(updated);
+    });
+
+    it('writes the mailing address, clearing with empty strings and leaving absent fields alone', async () => {
+      scanResolves(Model, []);
+      Model.update.mockResolvedValue(sampleContact());
+      await service.updateContact(
+        sampleContact({
+          address_line1: '1 Main St',
+          address_line2: '',
+          city: 'Scranton',
+          state: 'PA',
+        }),
+      );
+      const attrs = Model.update.mock.calls.at(-1)![1] as Record<
+        string,
+        unknown
+      >;
+      expect(attrs.address_line1).toBe('1 Main St');
+      expect(attrs.address_line2).toBe(''); // deliberate clear
+      expect(attrs.city).toBe('Scranton');
+      expect(attrs.state).toBe('PA');
+      expect('zip' in attrs).toBe(false); // not sent → untouched
     });
 
     it("rejects an edit that collides with another contact's email", async () => {
