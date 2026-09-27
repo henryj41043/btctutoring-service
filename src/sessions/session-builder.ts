@@ -36,10 +36,15 @@ export interface TutoringMonthInput {
   month: number;
   /** Calendar days before this local date are skipped (package start month). */
   notBefore?: Date;
+  /** 'YYYY-MM-DD': calendar days after this date are skipped (service end date). */
+  notAfter?: string;
   /** Existing series id per effective tutor — reused so "this and future"
    *  edits stay continuous across month boundaries; minted when absent. */
   seriesIdByTutor?: Map<string, string>;
 }
+
+const dayKey = (year: number, month: number, day: number): string =>
+  `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
 /** Normalises a possibly-overflowed (year, month) pair. */
 export function normalizeMonth(
@@ -88,6 +93,7 @@ export function buildTutoringMonthSessions(
       const date = new Date(year, month, day);
       if (WEEKDAY_BY_JS_DAY[date.getDay()] !== slot.weekday) continue;
       if (cutoff && date < cutoff) continue;
+      if (input.notAfter && dayKey(year, month, day) > input.notAfter) continue;
       sessions.push({
         type: SessionType.TUTORING,
         start_datetime: easternSlotToUtc(

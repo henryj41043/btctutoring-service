@@ -866,4 +866,89 @@ describe('AutoRenewService', () => {
       expect(result.sessionsCreated).toBe(0);
     });
   });
+
+  describe('Billing v2', () => {
+    const amounts = (): [string, number][] =>
+      billing.createBillingRecordIfAbsent.mock.calls.map((c) => [
+        c[0].period_start,
+        c[0].amount,
+      ]);
+
+    it('bills custom prices and student discounts through the engine', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ price_override: 300, discount_percent: 10 }),
+      ]);
+      await service.runAutoRenew(july);
+      expect(amounts()).toEqual([['2026-07-01', 270]]);
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith({
+        contact_id: 'c-1',
+        period_start: '2026-07-01',
+        cycle: 'monthly',
+        amount: 270,
+        paid: false,
+      });
+    });
+
+    it('a student whose service ended before the month is left out', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-06-30' }),
+      ]);
+      const result = await service.runAutoRenew(july);
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+      expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
+      expect(result.billingRecords).toBe(0);
+    });
+
+    it('a student ending on the 1st is still served and billed that day', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-07-01' }),
+      ]);
+      await service.runAutoRenew(july);
+      // Wed Jul 1 only: 1 of 9 sessions.
+      expect(sessions.createSessions.mock.calls[0][0]).toHaveLength(1);
+      expect(amounts()).toHaveLength(1);
+      expect(amounts()[0][0]).toBe('2026-07-01');
+      expect(amounts()[0][1]).toBeLessThan(362);
+    });
+
+    it('the final month stops at the end date and is prorated', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-07-15' }),
+      ]);
+      await service.runAutoRenew(july);
+      // Mon 6,13 + Wed 1,8,15 = 5 of 9.
+      const created = sessions.createSessions.mock.calls[0][0];
+      expect(created).toHaveLength(5);
+      expect(
+        created.every((s: any) => s.start_datetime < '2026-07-16T04:00'),
+      ).toBe(true);
+      // $362 x 12 / 52 = $83.54 a week, $41.77 a session; 5 sessions.
+      expect(amounts()).toEqual([['2026-07-01', 208.85]]);
+    });
+
+    it('a semi-monthly ending before the 15th bills only the 1st', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ service_end_date: '2026-07-08' }),
+      ]);
+      contacts.getContacts.mockResolvedValue([
+        parent({ billing_cycle: 'semi_monthly' }),
+        tutor(),
+      ]);
+      const result = await service.runAutoRenew(july);
+      // Wed 1, Mon 6, Wed 8 = 3 sessions.
+      expect(amounts()).toEqual([['2026-07-01', 125.31]]);
+      expect(billing.createBillingRecordIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ cycle: 'semi_monthly' }),
+      );
+      expect(result.billingRecords).toBe(1);
+    });
+
+    it('a fully discounted family gets no record', async () => {
+      students.getStudents.mockResolvedValue([
+        student({ discount_percent: 100 }),
+      ]);
+      await service.runAutoRenew(july);
+      expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -16,6 +16,13 @@ import {
 } from './pending-changes';
 import { PendingChange } from '../models/student.model';
 
+/** The statuses a student may take once service has ended. */
+export const END_STATUSES: string[] = [
+  STUDENT_STATUS.PAST_STUDENT,
+  STUDENT_STATUS.MIA,
+  STUDENT_STATUS.DECLINED_SERVICES,
+];
+
 /** Max keys per dynamoose batchGet request. */
 const BATCH_GET_LIMIT = 100;
 
@@ -72,6 +79,9 @@ export class StudentsService {
           : undefined,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
+      service_end_date: student.service_end_date,
+      // The end status only means something alongside an end date.
+      end_status: student.service_end_date ? student.end_status : undefined,
       price_override: student.price_override,
       // A 0% discount is no discount: never stored.
       discount_percent: student.discount_percent || undefined,
@@ -130,6 +140,43 @@ export class StudentsService {
         'discount_percent must be between 0 and 100, or null to clear.',
       );
     }
+  }
+
+  /**
+   * Rejects a malformed service end date or end status before anything is
+   * written (null = clear, undefined = leave alone).
+   */
+  private assertServiceEnd(student: Student): void {
+    const end: unknown = student.service_end_date;
+    if (
+      end !== undefined &&
+      end !== null &&
+      (typeof end !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(end) ||
+        isNaN(Date.parse(`${end}T00:00:00Z`)))
+    ) {
+      throw new BadRequestException(
+        'service_end_date must be formatted YYYY-MM-DD, or null to clear.',
+      );
+    }
+    const status: unknown = student.end_status;
+    if (
+      status !== undefined &&
+      status !== null &&
+      !END_STATUSES.includes(status as string)
+    ) {
+      throw new BadRequestException(
+        `end_status must be one of: ${END_STATUSES.join(', ')}.`,
+      );
+    }
+  }
+
+  /** A null end date clears it together with its end status. */
+  private serviceEndRemovals(student: Student): string[] {
+    if (student.service_end_date === null) {
+      return ['service_end_date', 'end_status'];
+    }
+    return student.end_status === null ? ['end_status'] : [];
   }
 
   /**
@@ -368,6 +415,7 @@ export class StudentsService {
 
   async createStudent(student: Student) {
     this.assertPricing(student);
+    this.assertServiceEnd(student);
     const newUuid: string = randomUUID();
     const attributes = this.buildStudentAttributes(student);
     // New students start in onboarding: the client only supplies a name, so
@@ -398,6 +446,7 @@ export class StudentsService {
 
   async updateStudent(student: Student) {
     this.assertPricing(student);
+    this.assertServiceEnd(student);
     const attributes = this.buildStudentAttributes(student);
     // An explicitly empty schedule/batch list means "clear it". dynamoose only
     // $SETs provided keys (and buildStudentAttributes drops empty arrays), so an
@@ -413,6 +462,7 @@ export class StudentsService {
       remove.push('extra_planning_by_tutor');
     }
     remove.push(...this.pricingRemovals(student));
+    remove.push(...this.serviceEndRemovals(student));
     const requested = this.pendingChangesRequested(student);
     if (requested !== undefined) {
       // Any pending write converges the record on the list: the legacy
@@ -564,6 +614,25 @@ export class StudentsService {
       Logger.error(error.message, error);
       return Promise.reject(error);
     });
+  }
+
+  /**
+   * Moves a student whose service has ended to their end status (Past
+   * Student unless the admin chose another). Daily-job only: touches the
+   * status and nothing else.
+   */
+  async applyServiceEnd(student: Student): Promise<string> {
+    const status =
+      student.end_status && END_STATUSES.includes(student.end_status)
+        ? student.end_status
+        : STUDENT_STATUS.PAST_STUDENT;
+    await StudentsModel.update({ id: student.id }, { status }).catch(
+      (error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      },
+    );
+    return status;
   }
 
   async deleteStudent(id: string) {

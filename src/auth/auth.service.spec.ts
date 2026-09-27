@@ -107,11 +107,16 @@ describe('AuthService', () => {
 
   describe('refresh', () => {
     it('exchanges the refresh token via REFRESH_TOKEN_AUTH with the username secret hash', async () => {
-      const auth: AuthenticationResultType = { AccessToken: 'fresh', IdToken: 'fresh-id' };
+      const auth: AuthenticationResultType = {
+        AccessToken: 'fresh',
+        IdToken: 'fresh-id',
+      };
       cognitoMock
         .on(InitiateAuthCommand)
         .resolves({ AuthenticationResult: auth });
-      await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual(auth);
+      await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual(
+        auth,
+      );
       const call = cognitoMock.commandCalls(InitiateAuthCommand)[0];
       expect(call.args[0].input.AuthFlow).toBe('REFRESH_TOKEN_AUTH');
       expect(call.args[0].input.AuthParameters?.['REFRESH_TOKEN']).toBe('rt-1');
@@ -126,7 +131,9 @@ describe('AuthService', () => {
     });
 
     it('returns a failure message on error (expired/revoked refresh token)', async () => {
-      cognitoMock.on(InitiateAuthCommand).rejects(new Error('NotAuthorizedException'));
+      cognitoMock
+        .on(InitiateAuthCommand)
+        .rejects(new Error('NotAuthorizedException'));
       await expect(service.refresh('cognito-user', 'rt-1')).resolves.toEqual({
         message: 'Refresh failed.',
       });

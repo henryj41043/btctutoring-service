@@ -4,6 +4,7 @@ import request from 'supertest';
 import { SessionHorizonController } from '../../src/billing/session-horizon.controller';
 import { SessionHorizonService } from '../../src/billing/session-horizon.service';
 import { BillingService } from '../../src/billing/billing.service';
+import { ServiceEndService } from '../../src/billing/service-end.service';
 import { StudentsService } from '../../src/students/students.service';
 import { SessionsService } from '../../src/sessions/sessions.service';
 import { ContactsService } from '../../src/contacts/contacts.service';
@@ -50,6 +51,7 @@ describe('Session horizon fill (integration)', () => {
       controllers: [SessionHorizonController],
       providers: [
         SessionHorizonService,
+        ServiceEndService,
         BillingService,
         StudentsService,
         SessionsService,
@@ -103,6 +105,31 @@ describe('Session horizon fill (integration)', () => {
     expect(Sessions.scan).toHaveBeenCalledWith({ student_id: { eq: 's-1' } });
     expect(chain.between).toHaveBeenCalled();
     expect(res.body.studentsFilled).toBe(1);
+  });
+
+  it('stops at the student service end date', async () => {
+    const thisMonth = new Date();
+    const next = new Date(thisMonth.getFullYear(), thisMonth.getMonth() + 1, 1);
+    const key = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+    Students.get.mockResolvedValue({
+      ...activeStudent,
+      service_end_date: `${key}-14`,
+    });
+    scanResolves(Contacts, [{ id: 't-1', first_name: 'Tess' }]);
+    scanResolves(Sessions, []);
+
+    const res = await request(server())
+      .post('/sessions/horizon/fill?student=s-1')
+      .set('x-test-role', 'admin');
+
+    expect(res.status).toBe(201);
+    // Only the Mondays on or before the 14th of next month.
+    const created = Sessions.batchPut.mock.calls.flatMap(
+      (c) => c[0] as { start_datetime: string }[],
+    );
+    expect(created.length).toBeGreaterThan(0);
+    expect(created.length).toBeLessThanOrEqual(2);
+    expect(created.every((s) => s.start_datetime.startsWith(key))).toBe(true);
   });
 
   it('tutor is forbidden', async () => {

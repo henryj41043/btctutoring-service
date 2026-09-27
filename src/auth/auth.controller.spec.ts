@@ -72,7 +72,10 @@ describe('AuthController', () => {
   });
 
   it('refresh delegates to the service', async () => {
-    await controller.refresh({ username: 'cognito-user', refreshToken: 'rt-1' });
+    await controller.refresh({
+      username: 'cognito-user',
+      refreshToken: 'rt-1',
+    });
     expect(service.refresh).toHaveBeenCalledWith('cognito-user', 'rt-1');
   });
 
