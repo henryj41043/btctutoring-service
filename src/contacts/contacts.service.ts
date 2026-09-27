@@ -10,6 +10,9 @@ interface SummaryScanPage {
   LastEvaluatedKey?: Record<string, unknown>;
 }
 
+/** The service value of an applicant (hiring pipeline) contact. */
+const EMPLOYMENT_INQUIRY = 'Employment Inquiry';
+
 @Injectable()
 export class ContactsService {
   constructor(private readonly documentClient: DynamoDBDocumentClient) {}
@@ -55,7 +58,7 @@ export class ContactsService {
           new ScanCommand({
             TableName: 'BTCTutoring-Contacts-Table',
             ProjectionExpression:
-              '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe',
+              '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe, #hir, #ir',
             ExpressionAttributeNames: {
               '#id': 'id',
               '#fn': 'first_name',
@@ -70,6 +73,10 @@ export class ContactsService {
               '#sst': 'scholarship_state',
               // Feeds the contacts table's copy-all-emails exclusion.
               '#ebe': 'exclude_bulk_email',
+              // Inquiry dates (epoch ms): the contacts table's "Applied"
+              // column + newest-first order for employment inquiries.
+              '#hir': 'hiring_inquiry_received',
+              '#ir': 'inquiry_received',
             },
             ExclusiveStartKey: lastKey,
           }),
@@ -183,7 +190,11 @@ export class ContactsService {
       zoom_link: contact.zoom_link,
       hourly_rate: contact.hourly_rate,
       hire_type: contact.hire_type,
-      hiring_inquiry_received: contact.hiring_inquiry_received,
+      // An employment inquiry is dated when it is entered unless the admin
+      // supplied the real date — the contacts table orders applicants by it.
+      hiring_inquiry_received:
+        contact.hiring_inquiry_received ??
+        (contact.service === EMPLOYMENT_INQUIRY ? new Date() : undefined),
       interview_offer_sent: contact.interview_offer_sent,
       interview_scheduled: contact.interview_scheduled,
       offer_sent: contact.offer_sent,

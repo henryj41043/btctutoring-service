@@ -87,7 +87,7 @@ describe('ContactsService', () => {
       };
       expect(cmd.input.TableName).toBe('BTCTutoring-Contacts-Table');
       expect(cmd.input.ProjectionExpression).toBe(
-        '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe',
+        '#id, #fn, #ln, #em, #ph, #sv, #ug, #st, #ss, #sst, #ebe, #hir, #ir',
       );
       expect(cmd.input.ExpressionAttributeNames).toEqual({
         '#id': 'id',
@@ -101,6 +101,8 @@ describe('ContactsService', () => {
         '#ss': 'scholarship_student',
         '#sst': 'scholarship_state',
         '#ebe': 'exclude_bulk_email',
+        '#hir': 'hiring_inquiry_received',
+        '#ir': 'inquiry_received',
       });
       expect(cmd.input.ExclusiveStartKey).toBeUndefined();
     });
@@ -172,6 +174,52 @@ describe('ContactsService', () => {
   });
 
   describe('createContact', () => {
+    describe('employment inquiry date', () => {
+      beforeEach(() => {
+        scanResolves(Model, []);
+        Model.__save.mockResolvedValue(undefined);
+        jest.useFakeTimers().setSystemTime(new Date('2026-09-27T15:00:00Z'));
+      });
+      afterEach(() => jest.useRealTimers());
+      const saved = () =>
+        (Model as unknown as jest.Mock).mock.calls.at(-1)![0] as {
+          hiring_inquiry_received?: Date;
+        };
+
+      it('stamps today on a new employment inquiry without a date', async () => {
+        await service.createContact(
+          sampleContact({
+            service: 'Employment Inquiry',
+            hiring_inquiry_received: undefined,
+          }),
+        );
+        expect(saved().hiring_inquiry_received).toEqual(
+          new Date('2026-09-27T15:00:00Z'),
+        );
+      });
+
+      it('keeps a supplied inquiry date', async () => {
+        const given = new Date('2026-08-01T00:00:00Z');
+        await service.createContact(
+          sampleContact({
+            service: 'Employment Inquiry',
+            hiring_inquiry_received: given,
+          }),
+        );
+        expect(saved().hiring_inquiry_received).toBe(given);
+      });
+
+      it('does not date other kinds of contact', async () => {
+        await service.createContact(
+          sampleContact({
+            service: 'Tutoring',
+            hiring_inquiry_received: undefined,
+          }),
+        );
+        expect(saved().hiring_inquiry_received).toBeUndefined();
+      });
+    });
+
     it('saves a new contact and returns a generated id', async () => {
       scanResolves(Model, []); // duplicate-email check finds nothing
       Model.__save.mockResolvedValue(undefined);
