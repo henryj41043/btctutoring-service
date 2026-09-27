@@ -4,6 +4,8 @@ import { BillingController } from './billing.controller';
 import { AutoRenewService } from './auto-renew.service';
 import { SessionHorizonService } from './session-horizon.service';
 import { SessionHorizonController } from './session-horizon.controller';
+import { StatementService } from './statement.service';
+import { StatementController } from './statement.controller';
 import { StudentsModule } from '../students/students.module';
 import { SessionsModule } from '../sessions/sessions.module';
 import { ContactsModule } from '../contacts/contacts.module';
@@ -11,8 +13,17 @@ import { PackagesModule } from '../packages/packages.module';
 
 @Module({
   imports: [StudentsModule, SessionsModule, ContactsModule, PackagesModule],
-  controllers: [BillingController, SessionHorizonController],
-  providers: [BillingService, AutoRenewService, SessionHorizonService],
+  controllers: [
+    BillingController,
+    SessionHorizonController,
+    StatementController,
+  ],
+  providers: [
+    BillingService,
+    AutoRenewService,
+    SessionHorizonService,
+    StatementService,
+  ],
   exports: [BillingService],
 })
 export class BillingModule {}

@@ -12,6 +12,17 @@ const SCHEDULE_SLOT_SCHEMA = {
   },
 };
 
+/** A one-off session in a segment's start week (Billing v2). */
+const FIRST_WEEK_SESSION_SCHEMA = {
+  type: Object,
+  schema: {
+    date: String,
+    start_time: String,
+    end_time: String,
+    tutor_id: String,
+  },
+};
+
 export const StudentsSchema = new dynamoose.Schema({
   id: {
     type: String,
@@ -93,6 +104,8 @@ export const StudentsSchema = new dynamoose.Schema({
           custom_session_length_min: Number,
           // The effective date this change's advance notice was sent for.
           notice_sent: String,
+          // Monthly price replacing the new package's price (Billing v2).
+          price_override: Number,
           // The new package's weekly slots, swapped in at promotion.
           schedule: { type: Array, schema: [SCHEDULE_SLOT_SCHEMA] },
         },
@@ -114,6 +127,43 @@ export const StudentsSchema = new dynamoose.Schema({
   pending_schedule: {
     type: Array,
     schema: [SCHEDULE_SLOT_SCHEMA],
+  },
+  // Billing v2: last day of service (inclusive) and the status the daily job
+  // applies once it has passed.
+  service_end_date: String,
+  end_status: String,
+  // Billing v2: per-student monthly price and discount percent (any package).
+  price_override: Number,
+  discount_percent: Number,
+  discount_reason: String,
+  first_week_sessions: {
+    type: Array,
+    schema: [FIRST_WEEK_SESSION_SCHEMA],
+  },
+  // Billing v2: closed service segments, oldest first, so past months never
+  // re-derive from the student's current settings.
+  package_history: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          package: String,
+          start: String,
+          end: String,
+          custom_monthly_cost: Number,
+          custom_sessions_per_week: Number,
+          custom_session_length_min: Number,
+          price_override: Number,
+          discount_percent: Number,
+          schedule: { type: Array, schema: [SCHEDULE_SLOT_SCHEMA] },
+          first_week_sessions: {
+            type: Array,
+            schema: [FIRST_WEEK_SESSION_SCHEMA],
+          },
+        },
+      },
+    ],
   },
   // Deprecated: replaced by package-driven scheduling. Kept so reads of
   // pre-existing records don't error.
