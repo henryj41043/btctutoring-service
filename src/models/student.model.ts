@@ -21,6 +21,34 @@ export class PendingChange {
   schedule?: ScheduleSlot[];
   /** The effective date this change's advance notice was sent for (cron-only writer). */
   notice_sent?: string;
+  /** Monthly price replacing the new package's price (Billing v2). */
+  price_override?: number;
+}
+
+/** A one-off tutoring session in a segment's start week (counts for proration). */
+export class FirstWeekSession {
+  date: string; // 'YYYY-MM-DD'
+  start_time: string; // 'HH:mm'
+  end_time: string; // 'HH:mm'
+  tutor_id?: string;
+}
+
+/**
+ * A closed service segment (Billing v2): the package, price and schedule a
+ * student was on between two dates, kept so past months never re-derive from
+ * the student's current settings.
+ */
+export class PackageSegment {
+  package: string;
+  start: string; // 'YYYY-MM-DD'
+  end: string; // 'YYYY-MM-DD', inclusive
+  custom_monthly_cost?: number;
+  custom_sessions_per_week?: number;
+  custom_session_length_min?: number;
+  price_override?: number;
+  discount_percent?: number;
+  schedule?: ScheduleSlot[];
+  first_week_sessions?: FirstWeekSession[];
 }
 
 /** A dated lot of remaining make-up minutes; expires 90 days after earned_date. */
@@ -82,6 +110,19 @@ export class Student {
   pending_schedule?: ScheduleSlot[];
   /** The 'YYYY-MM' the mid_month_prior_charge applies to (that month only). */
   mid_month_change_period?: string;
+  /** 'YYYY-MM-DD' last day of service (inclusive); the final month prorates to it. */
+  service_end_date?: string;
+  /** The status applied by the daily job once service_end_date has passed. */
+  end_status?: string;
+  /** Monthly price replacing the package's price for this student. */
+  price_override?: number;
+  /** Percent (0-100) taken off this student's package charge. */
+  discount_percent?: number;
+  discount_reason?: string;
+  /** One-off sessions in the current segment's start week. */
+  first_week_sessions?: FirstWeekSession[];
+  /** Closed service segments, oldest first. */
+  package_history?: PackageSegment[];
   /** @deprecated Replaced by package-driven scheduling; retained for old records. */
   available_minutes?: number;
 }
