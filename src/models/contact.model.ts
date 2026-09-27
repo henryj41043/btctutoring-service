@@ -19,12 +19,39 @@ export class AvailabilityBlock {
   end_time: string;
 }
 
+/**
+ * Mailing address fields: admin-only data. Stripped from every contact
+ * record returned to a non-admin.
+ */
+export const CONTACT_ADDRESS_FIELDS = [
+  'address_line1',
+  'address_line2',
+  'city',
+  'state',
+  'zip',
+] as const;
+
 export class Contact {
   id?: string;
   first_name: string;
   last_name: string;
   email: string;
   phone_number: string;
+  @IsOptional()
+  @IsString()
+  address_line1?: string;
+  @IsOptional()
+  @IsString()
+  address_line2?: string;
+  @IsOptional()
+  @IsString()
+  city?: string;
+  @IsOptional()
+  @IsString()
+  state?: string;
+  @IsOptional()
+  @IsString()
+  zip?: string;
   service: string;
   status?: string;
   monthly_charge?: number;
