@@ -456,7 +456,7 @@ describe('segmentLine — the one proration rule', () => {
     })!;
     expect(zero.amount).toBe(0);
     expect(zero.flags).toEqual(['price_override']);
-    for (const bad of [-1, NaN, Infinity, '5' as unknown as number]) {
+    for (const bad of [-1, NaN, Infinity, null, '5' as unknown as number]) {
       const l = line({
         package: 'Start',
         start: '2026-05-01',
@@ -554,7 +554,14 @@ describe('segmentLine — the one proration rule', () => {
       })!;
       expect(l.discount_percent).toBe(100);
       expect(l.net).toBe(0);
-      for (const bad of [0, -5, NaN, Infinity, '10' as unknown as number]) {
+      for (const bad of [
+        0,
+        -5,
+        NaN,
+        Infinity,
+        null,
+        '10' as unknown as number,
+      ]) {
         const plain = line({
           package: 'Start',
           start: '2026-05-01',

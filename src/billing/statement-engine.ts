@@ -51,8 +51,8 @@ export interface ServiceSegment {
   custom_monthly_cost?: number;
   custom_sessions_per_week?: number;
   custom_session_length_min?: number;
-  price_override?: number;
-  discount_percent?: number;
+  price_override?: number | null;
+  discount_percent?: number | null;
   schedule?: ScheduleSlot[];
   first_week_sessions?: FirstWeekSession[];
 }
@@ -173,14 +173,14 @@ export function countSlotsBetween(
   return count;
 }
 
-const clampPercent = (value: number | undefined): number => {
+const clampPercent = (value: number | null | undefined): number => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return 0;
   }
   return Math.min(100, value);
 };
 
-const validPrice = (value: number | undefined): value is number =>
+const validPrice = (value: number | null | undefined): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
 /**
@@ -287,7 +287,9 @@ export function segmentLine(
   }
 
   const overridden = validPrice(segment.price_override);
-  const monthly = overridden ? segment.price_override! : def.monthlyCost;
+  const monthly = validPrice(segment.price_override)
+    ? segment.price_override
+    : def.monthlyCost;
   const rate = perSessionCost({ ...def, monthlyCost: monthly });
   const schedule = segment.schedule ?? [];
   const inMonth = countSlotsBetween(
@@ -330,7 +332,7 @@ export function segmentLine(
 /** Applies a student discount percent to a line. */
 function withDiscount(
   line: StatementLine,
-  percent: number | undefined,
+  percent: number | null | undefined,
 ): StatementLine {
   const pct = clampPercent(percent);
   const discount = round2((line.amount * pct) / 100);

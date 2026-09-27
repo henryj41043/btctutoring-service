@@ -665,6 +665,178 @@ describe('StudentsService', () => {
       expect(update).not.toHaveProperty('pending_package');
     });
 
+    describe('custom price and discount', () => {
+      const lastUpdate = () => Model.update.mock.calls.at(-1)![1];
+
+      it('persists a custom price, a discount and its trimmed reason', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          price_override: 410.4,
+          discount_percent: 10,
+          discount_reason: '  Staff family  ',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          price_override: 410.4,
+          discount_percent: 10,
+          discount_reason: 'Staff family',
+        });
+      });
+
+      it('accepts a $0 custom price and a 100% discount', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          price_override: 0,
+          discount_percent: 100,
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          price_override: 0,
+          discount_percent: 100,
+        });
+      });
+
+      it('null clears the custom price and the discount with its reason', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          name: 'Pat',
+          price_override: null,
+          discount_percent: null,
+          discount_reason: 'old',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          $SET: { name: 'Pat' },
+          $REMOVE: ['price_override', 'discount_percent', 'discount_reason'],
+        });
+      });
+
+      it('a 0% discount is a clear, never stored', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          discount_percent: 0,
+          discount_reason: 'old',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({
+          $SET: {},
+          $REMOVE: ['discount_percent', 'discount_reason'],
+        });
+      });
+
+      it.each([[''], ['   '], [null]])(
+        'a blanked reason (%p) is removed while the discount stays',
+        async (reason) => {
+          Model.update.mockResolvedValue({});
+          await service.updateStudent({
+            id: 's-1',
+            discount_percent: 10,
+            discount_reason: reason,
+          } as unknown as Student);
+          expect(lastUpdate()).toEqual({
+            $SET: { discount_percent: 10 },
+            $REMOVE: ['discount_reason'],
+          });
+        },
+      );
+
+      it('an absent reason leaves the stored one alone', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          discount_percent: 10,
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({ discount_percent: 10 });
+      });
+
+      it('never stores a reason without a discount', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          discount_reason: 'orphan',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({});
+        await service.updateStudent({
+          id: 's-1',
+          discount_reason: '',
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({});
+      });
+
+      it('a non-string reason is dropped', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          discount_percent: 10,
+          discount_reason: 5,
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({ discount_percent: 10 });
+      });
+
+      it.each([[-1], [NaN], [Infinity], ['5'], [true]])(
+        'rejects the custom price %p before writing',
+        async (price) => {
+          await expect(
+            service.updateStudent({
+              id: 's-1',
+              price_override: price,
+            } as unknown as Student),
+          ).rejects.toThrow(
+            'price_override must be a non-negative number, or null to clear.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each([[-1], [100.01], [NaN], [Infinity], ['10'], [true]])(
+        'rejects the discount %p before writing',
+        async (percent) => {
+          await expect(
+            service.updateStudent({
+              id: 's-1',
+              discount_percent: percent,
+            } as unknown as Student),
+          ).rejects.toThrow(
+            'discount_percent must be between 0 and 100, or null to clear.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('createStudent validates and stores the same fields', async () => {
+        Model.__save.mockResolvedValue({});
+        await service.createStudent({
+          name: 'Pat',
+          price_override: 300,
+          discount_percent: 5,
+          discount_reason: 'Referral',
+        } as unknown as Student);
+        expect(Model.mock.calls.at(-1)![0]).toEqual(
+          expect.objectContaining({
+            price_override: 300,
+            discount_percent: 5,
+            discount_reason: 'Referral',
+          }),
+        );
+        await service.createStudent({
+          name: 'Pat',
+          price_override: null,
+          discount_percent: 0,
+          discount_reason: 'x',
+        } as unknown as Student);
+        const saved = Model.mock.calls.at(-1)![0];
+        expect(saved).not.toHaveProperty('price_override');
+        expect(saved).not.toHaveProperty('discount_percent');
+        expect(saved).not.toHaveProperty('discount_reason');
+        await expect(
+          service.createStudent({
+            name: 'Pat',
+            discount_percent: 101,
+          } as unknown as Student),
+        ).rejects.toThrow('discount_percent must be between 0 and 100');
+      });
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
