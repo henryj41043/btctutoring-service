@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Student } from '../models/student.model';
 import { StudentsModel } from '../models/students.model';
 import { ContactsModel } from '../models/contacts.model';
@@ -72,6 +72,10 @@ export class StudentsService {
           : undefined,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
+      price_override: student.price_override,
+      // A 0% discount is no discount: never stored.
+      discount_percent: student.discount_percent || undefined,
+      discount_reason: this.discountReasonOf(student),
       // The legacy pending_* scalars are never written again (see
       // pendingChangesRequested) — only the list.
       pending_changes:
@@ -86,6 +90,66 @@ export class StudentsService {
       }
     }
     return candidate;
+  }
+
+  /** The trimmed discount reason, kept only alongside a discount. */
+  private discountReasonOf(student: Student): string | undefined {
+    if (!student.discount_percent) return undefined;
+    const reason =
+      typeof student.discount_reason === 'string'
+        ? student.discount_reason.trim()
+        : '';
+    return reason || undefined;
+  }
+
+  /**
+   * Rejects a malformed custom price or discount before anything is written
+   * (null = clear, undefined = leave alone). Billing reads these directly.
+   */
+  private assertPricing(student: Student): void {
+    const price: unknown = student.price_override;
+    if (
+      price !== undefined &&
+      price !== null &&
+      (typeof price !== 'number' || !Number.isFinite(price) || price < 0)
+    ) {
+      throw new BadRequestException(
+        'price_override must be a non-negative number, or null to clear.',
+      );
+    }
+    const percent: unknown = student.discount_percent;
+    if (
+      percent !== undefined &&
+      percent !== null &&
+      (typeof percent !== 'number' ||
+        !Number.isFinite(percent) ||
+        percent < 0 ||
+        percent > 100)
+    ) {
+      throw new BadRequestException(
+        'discount_percent must be between 0 and 100, or null to clear.',
+      );
+    }
+  }
+
+  /**
+   * The pricing attributes an update must $REMOVE: a null custom price, a
+   * null or 0% discount, and the reason whenever the discount goes or the
+   * reason itself is blanked.
+   */
+  private pricingRemovals(student: Student): string[] {
+    const remove: string[] = [];
+    if (student.price_override === null) remove.push('price_override');
+    const percent: unknown = student.discount_percent;
+    const discountCleared = percent === null || percent === 0;
+    if (discountCleared) remove.push('discount_percent');
+    const reason: unknown = student.discount_reason;
+    const reasonBlanked =
+      reason === null || (typeof reason === 'string' && reason.trim() === '');
+    if (discountCleared || (percent !== undefined && reasonBlanked)) {
+      remove.push('discount_reason');
+    }
+    return remove;
   }
 
   /** True when the client sent an explicitly empty schedule, signalling a clear. */
@@ -303,6 +367,7 @@ export class StudentsService {
   }
 
   async createStudent(student: Student) {
+    this.assertPricing(student);
     const newUuid: string = randomUUID();
     const attributes = this.buildStudentAttributes(student);
     // New students start in onboarding: the client only supplies a name, so
@@ -332,6 +397,7 @@ export class StudentsService {
   }
 
   async updateStudent(student: Student) {
+    this.assertPricing(student);
     const attributes = this.buildStudentAttributes(student);
     // An explicitly empty schedule/batch list means "clear it". dynamoose only
     // $SETs provided keys (and buildStudentAttributes drops empty arrays), so an
@@ -346,6 +412,7 @@ export class StudentsService {
     ) {
       remove.push('extra_planning_by_tutor');
     }
+    remove.push(...this.pricingRemovals(student));
     const requested = this.pendingChangesRequested(student);
     if (requested !== undefined) {
       // Any pending write converges the record on the list: the legacy

@@ -98,6 +98,42 @@ describe('Students & Notes (integration, admin-only)', () => {
         .send({ name: 'Pat', contact_id: 'c-1' });
       expect(res.status).toBe(201);
     });
+
+    it('admin saves a custom price and discount; null clears them', async () => {
+      StudentModel.update.mockResolvedValue({ id: 's-1' });
+      const save = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({ id: 's-1', price_override: 410.4, discount_percent: 10 });
+      expect(save.status).toBe(200);
+      expect(StudentModel.update).toHaveBeenLastCalledWith(
+        { id: 's-1' },
+        { price_override: 410.4, discount_percent: 10 },
+      );
+
+      const clear = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({ id: 's-1', price_override: null, discount_percent: null });
+      expect(clear.status).toBe(200);
+      expect(StudentModel.update).toHaveBeenLastCalledWith(
+        { id: 's-1' },
+        {
+          $SET: {},
+          $REMOVE: ['price_override', 'discount_percent', 'discount_reason'],
+        },
+      );
+    });
+
+    it('rejects a discount above 100 percent', async () => {
+      StudentModel.update.mockClear();
+      const res = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({ id: 's-1', discount_percent: 120 });
+      expect(res.status).toBe(400);
+      expect(StudentModel.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('notes', () => {

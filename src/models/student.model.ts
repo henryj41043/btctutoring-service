@@ -114,11 +114,11 @@ export class Student {
   service_end_date?: string;
   /** The status applied by the daily job once service_end_date has passed. */
   end_status?: string;
-  /** Monthly price replacing the package's price for this student. */
-  price_override?: number;
-  /** Percent (0-100) taken off this student's package charge. */
-  discount_percent?: number;
-  discount_reason?: string;
+  /** Monthly price replacing the package's price for this student (null on save = clear). */
+  price_override?: number | null;
+  /** Percent (0-100) taken off this student's package charge (null or 0 on save = clear). */
+  discount_percent?: number | null;
+  discount_reason?: string | null;
   /** One-off sessions in the current segment's start week. */
   first_week_sessions?: FirstWeekSession[];
   /** Closed service segments, oldest first. */
