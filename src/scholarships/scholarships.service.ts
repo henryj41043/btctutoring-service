@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ScholarshipsModel } from '../models/scholarships.model';
 import { ScholarshipRecord } from '../models/scholarship-record.model';
 
@@ -53,6 +53,23 @@ export class ScholarshipsService {
   }
 
   /**
+   * A real Date for a dynamoose Date attribute. The request pipe already
+   * converts ISO strings; this also covers non-HTTP callers (scripts) so a
+   * string or epoch never reaches the model. Blank → undefined (stripped);
+   * unparseable → 400.
+   */
+  private static toDate(value: unknown): Date | undefined {
+    if (value === null || value === undefined || value === '') {
+      return undefined;
+    }
+    const date = value instanceof Date ? value : new Date(value as string);
+    if (isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid date in scholarship record.');
+    }
+    return date;
+  }
+
+  /**
    * Creates or fully replaces the record for (contact, month). The caller
    * supplies the full intended state; the deterministic id makes the write
    * idempotent.
@@ -65,10 +82,14 @@ export class ScholarshipsService {
       month: record.month,
       scholarship_state: record.scholarship_state,
       invoice_Month: record.invoice_Month,
-      date_funds_requested_by_btc: record.date_funds_requested_by_btc,
-      date_funds_requested_by_family: record.date_funds_requested_by_family,
+      date_funds_requested_by_btc: ScholarshipsService.toDate(
+        record.date_funds_requested_by_btc,
+      ),
+      date_funds_requested_by_family: ScholarshipsService.toDate(
+        record.date_funds_requested_by_family,
+      ),
       invoice_number: record.invoice_number,
-      invoice_paid_date: record.invoice_paid_date,
+      invoice_paid_date: ScholarshipsService.toDate(record.invoice_paid_date),
     };
     // The form sends null for empty optional fields, and dynamoose rejects
     // null for typed (notably Date) attributes ("Expected ... to be of type

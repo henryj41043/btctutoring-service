@@ -116,6 +116,35 @@ describe('ScholarshipsService', () => {
       expect(attrs.id).toBe('contact-1#2026-08');
     });
 
+    it('coerces string and epoch dates to real Dates (non-HTTP callers)', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      await service.upsertScholarshipRecord(
+        sampleRecord({
+          invoice_paid_date: '2026-09-15T04:00:00.000Z' as never,
+          date_funds_requested_by_btc: 1789000000000 as never,
+          date_funds_requested_by_family: '' as never,
+        }),
+      );
+      const attrs = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(attrs.invoice_paid_date).toBeInstanceOf(Date);
+      expect(attrs.invoice_paid_date.toISOString()).toBe(
+        '2026-09-15T04:00:00.000Z',
+      );
+      expect(attrs.date_funds_requested_by_btc).toBeInstanceOf(Date);
+      expect(attrs.date_funds_requested_by_btc.getTime()).toBe(1789000000000);
+      // A blank string is "no date" — stripped like null.
+      expect(attrs).not.toHaveProperty('date_funds_requested_by_family');
+    });
+
+    it('rejects an unparseable date without saving', async () => {
+      await expect(
+        service.upsertScholarshipRecord(
+          sampleRecord({ invoice_paid_date: 'not-a-date' as never }),
+        ),
+      ).rejects.toThrow('Invalid date in scholarship record.');
+      expect(Model.__save).not.toHaveBeenCalled();
+    });
+
     it('propagates save failures', async () => {
       Model.__save.mockRejectedValue(new Error('save boom'));
       await expect(
