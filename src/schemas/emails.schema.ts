@@ -26,4 +26,19 @@ export const EmailsSchema = new dynamoose.Schema({
   assigned_by: String,
   assigned_at: String,
   created_at: String,
+  // A forwarded conversation (several messages filed as one entry).
+  is_thread: Boolean,
+  message_count: Number,
+  participants: {
+    type: Array,
+    schema: [
+      {
+        type: Object,
+        schema: {
+          email: String,
+          name: String,
+        },
+      },
+    ],
+  },
 });

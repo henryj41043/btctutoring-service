@@ -70,6 +70,22 @@ describe('EmailsService', () => {
       });
     });
 
+    it('returns a conversation with its participants and message count', async () => {
+      const thread = entry({
+        id: 'thread',
+        is_thread: true,
+        message_count: 3,
+        participants: [
+          { email: 'jane@example.com', name: 'Jane Parent' },
+          { email: 'admin@btc.test' },
+        ],
+      });
+      scanResolves(Model, [thread]);
+      await expect(service.getEmailsByContact('c-1')).resolves.toEqual([
+        thread,
+      ]);
+    });
+
     it('falls back to received_at when sent_at is missing', async () => {
       const noSent = entry({
         id: 'no-sent',
