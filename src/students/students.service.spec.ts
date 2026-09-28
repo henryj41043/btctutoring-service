@@ -548,6 +548,15 @@ describe('StudentsService', () => {
 
     it('persists a sanitized scheduled-change list and removes the legacy scalars, with no $SET overlap', async () => {
       Model.update.mockResolvedValue(sampleStudent());
+      // Both dates are already stored, so they stay valid whatever today is.
+      Model.get.mockResolvedValue(
+        sampleStudent({
+          pending_changes: [
+            { package: 'Succeed', effective: '2027-01-01' },
+            { package: 'Achieve', effective: '2026-09-01' },
+          ],
+        }),
+      );
       await service.updateStudent(
         sampleStudent({
           pending_changes: [
@@ -962,6 +971,201 @@ describe('StudentsService', () => {
       });
     });
 
+    describe('scheduled change validation', () => {
+      // Sept 14 2026, 3pm Eastern. Look-ahead: through Dec 31 2026.
+      const now = new Date('2026-09-14T19:00:00Z');
+      const save = (changes: unknown[], stored: unknown[] = []) => {
+        Model.update.mockResolvedValue({});
+        Model.get.mockResolvedValue(
+          sampleStudent({ pending_changes: stored as never }),
+        );
+        return service.updateStudent(
+          sampleStudent({ pending_changes: changes as never }),
+          now,
+        );
+      };
+      const written = () =>
+        (Model.update.mock.calls.at(-1)![1] as { $SET: Record<string, any> })
+          .$SET.pending_changes;
+
+      it('accepts any future day inside the look-ahead, with a price', async () => {
+        await save([
+          { package: 'Achieve', effective: '2026-10-14', price_override: 300 },
+          { package: 'Excel', effective: '2026-09-15' },
+          { package: 'Thrive', effective: '2026-12-31', price_override: 0 },
+        ]);
+        expect(written()).toEqual([
+          { package: 'Excel', effective: '2026-09-15' },
+          { package: 'Achieve', effective: '2026-10-14', price_override: 300 },
+          { package: 'Thrive', effective: '2026-12-31', price_override: 0 },
+        ]);
+        expect(Model.get).toHaveBeenCalledWith('student-1');
+      });
+
+      it.each([['2026-09-14'], ['2026-09-01'], ['2025-12-31']])(
+        'rejects %s: today or earlier',
+        async (effective) => {
+          await expect(
+            save([{ package: 'Achieve', effective }]),
+          ).rejects.toThrow(
+            'A scheduled change must take effect on a future date.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('uses the Eastern date for "today"', async () => {
+        // 02:00 UTC on the 15th is still the 14th in New York.
+        Model.update.mockResolvedValue({});
+        Model.get.mockResolvedValue(sampleStudent());
+        await expect(
+          service.updateStudent(
+            sampleStudent({
+              pending_changes: [
+                { package: 'Achieve', effective: '2026-09-15' },
+              ],
+            }),
+            new Date('2026-09-15T02:00:00Z'),
+          ),
+        ).resolves.toBeDefined();
+      });
+
+      it('rejects a date beyond the look-ahead', async () => {
+        await expect(
+          save([{ package: 'Achieve', effective: '2027-01-01' }]),
+        ).rejects.toThrow(
+          'A scheduled change can be set no later than 2026-12-31.',
+        );
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+
+      it('a date that is already stored stays valid', async () => {
+        await save(
+          [
+            { package: 'Achieve', effective: '2026-09-01' },
+            { package: 'Excel', effective: '2027-03-01' },
+          ],
+          [
+            { package: 'Achieve', effective: '2026-09-01' },
+            { package: 'Excel', effective: '2027-03-01' },
+          ],
+        );
+        expect(written()).toHaveLength(2);
+      });
+
+      it('treats a failed or empty lookup as nothing stored', async () => {
+        Model.update.mockResolvedValue({});
+        Model.get.mockRejectedValue(new Error('down'));
+        await expect(
+          service.updateStudent(
+            sampleStudent({
+              pending_changes: [
+                { package: 'Achieve', effective: '2026-09-01' },
+              ],
+            }),
+            now,
+          ),
+        ).rejects.toThrow('on a future date');
+        Model.get.mockResolvedValue(undefined);
+        await expect(
+          service.updateStudent(
+            sampleStudent({
+              pending_changes: [
+                { package: 'Achieve', effective: '2026-10-14' },
+              ],
+            }),
+            now,
+          ),
+        ).resolves.toBeDefined();
+      });
+
+      it.each([['2026-10-14T00:00:00'], ['10/14/2026'], ['2026-13-40']])(
+        'rejects the malformed date %s',
+        async (effective) => {
+          await expect(
+            save([{ package: 'Achieve', effective }]),
+          ).rejects.toThrow(
+            'A scheduled change date must be formatted YYYY-MM-DD.',
+          );
+          expect(Model.get).not.toHaveBeenCalled();
+        },
+      );
+
+      it('rejects two changes on the same date', async () => {
+        await expect(
+          save([
+            { package: 'Achieve', effective: '2026-10-14' },
+            { package: 'Excel', effective: '2026-10-14' },
+          ]),
+        ).rejects.toThrow('Two scheduled changes share the same date.');
+      });
+
+      it.each([[-1], [NaN], [Infinity], ['300'], [true]])(
+        'rejects the price %p',
+        async (price) => {
+          await expect(
+            save([
+              {
+                package: 'Achieve',
+                effective: '2026-10-14',
+                price_override: price,
+              },
+            ]),
+          ).rejects.toThrow(
+            "A scheduled change's price_override must be a non-negative number.",
+          );
+        },
+      );
+
+      it('a null price and junk entries are simply dropped', async () => {
+        await save([
+          { package: 'Achieve', effective: '2026-10-14', price_override: null },
+          null,
+          'x',
+        ]);
+        expect(written()).toEqual([
+          { package: 'Achieve', effective: '2026-10-14' },
+        ]);
+      });
+
+      it('skips the lookup when no list or an empty one is sent', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent(sampleStudent(), now);
+        await service.updateStudent(
+          sampleStudent({ pending_changes: [] }),
+          now,
+        );
+        expect(Model.get).not.toHaveBeenCalled();
+      });
+
+      it('a new student has nothing stored', async () => {
+        Model.__save.mockResolvedValue({});
+        await expect(
+          service.createStudent(
+            sampleStudent({
+              id: undefined,
+              pending_changes: [
+                { package: 'Achieve', effective: '2026-09-01' },
+              ],
+            }),
+            now,
+          ),
+        ).rejects.toThrow('on a future date');
+        expect(Model.get).not.toHaveBeenCalled();
+        await expect(
+          service.createStudent(
+            sampleStudent({
+              id: undefined,
+              pending_changes: [
+                { package: 'Achieve', effective: '2026-10-14' },
+              ],
+            }),
+            now,
+          ),
+        ).resolves.toBeDefined();
+      });
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
@@ -1160,6 +1364,10 @@ describe('StudentsService', () => {
         // Zoneless local-wall stamp — never a bare 'YYYY-MM-DD'.
         package_start_date: '2026-09-01T00:00:00',
         schedule: [monday],
+        // The package the student was on is kept for past months.
+        package_history: [
+          { package: 'Succeed', start: '1970-01-01', end: '2026-08-31' },
+        ],
       });
       expect(update.$REMOVE).toEqual([
         ...LEGACY,
@@ -1167,6 +1375,8 @@ describe('StudentsService', () => {
         'custom_monthly_cost',
         'custom_sessions_per_week',
         'custom_session_length_min',
+        'price_override',
+        'first_week_sessions',
       ]);
     });
 
@@ -1200,12 +1410,30 @@ describe('StudentsService', () => {
         package_start_date: '2026-11-01T00:00:00',
         schedule: [tuesday],
         pending_changes: [{ package: 'Excel', effective: '2026-12-01' }],
+        // Superseded due changes are kept as the months they governed.
+        package_history: [
+          { package: 'Succeed', start: '1970-01-01', end: '2026-08-31' },
+          {
+            package: 'Achieve',
+            start: '2026-09-01',
+            end: '2026-09-30',
+            schedule: [monday],
+          },
+          {
+            package: 'Apex',
+            start: '2026-10-01',
+            end: '2026-10-31',
+            schedule: [tuesday],
+          },
+        ],
       });
       expect(update.$REMOVE).toEqual([
         ...LEGACY,
         'custom_monthly_cost',
         'custom_sessions_per_week',
         'custom_session_length_min',
+        'price_override',
+        'first_week_sessions',
       ]);
     });
 

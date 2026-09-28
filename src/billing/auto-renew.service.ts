@@ -8,18 +8,15 @@ import { PackagesService } from '../packages/packages.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
-import { CUSTOM_PACKAGE } from './package-config';
 import { buildStatement, keyOf } from './statement-engine';
 import { easternSlotToUtc } from './eastern-time';
 import { STUDENT_STATUS } from '../students/student-status';
-import {
-  LEGACY_PENDING_FIELDS,
-  planPromotion,
-} from '../students/pending-changes';
+import { applyPromotion } from '../students/pending-changes';
 import {
   buildGroupRollSessions,
-  buildTutoringMonthSessions,
+  buildTutoringSegmentSessions,
   PENDING_STATUS,
+  scheduleSegmentsForMonth,
 } from '../sessions/session-builder';
 
 const ACTIVE_STUDENT = STUDENT_STATUS.ACTIVE_STUDENT;
@@ -110,8 +107,8 @@ export class AutoRenewService {
     for (const student of activeStudents) {
       // Every due change (possibly several after a downed cron) is applied
       // in one write; the last due one wins.
-      const plan = planPromotion(student, monthStartKey);
-      if (!plan) continue;
+      const result = applyPromotion(student, monthStartKey);
+      if (!result) continue;
       try {
         // Snapshot: the persisted write must see the pending fields exactly
         // as loaded, independent of the in-memory mutation below.
@@ -126,30 +123,14 @@ export class AutoRenewService {
         );
         continue;
       }
-      // Mirror the persisted promotion in-memory for the loops below.
-      const onTime = plan.last.effective === monthStartKey;
-      student.package = plan.last.package;
-      student.package_start_date = `${plan.last.effective}T00:00:00`;
-      if (student.package === CUSTOM_PACKAGE) {
-        student.custom_monthly_cost = plan.last.custom_monthly_cost;
-        student.custom_sessions_per_week = plan.last.custom_sessions_per_week;
-        student.custom_session_length_min = plan.last.custom_session_length_min;
-      } else {
-        delete student.custom_monthly_cost;
-        delete student.custom_sessions_per_week;
-        delete student.custom_session_length_min;
+      // Mirror the persisted promotion in-memory for the loops below (the
+      // billing records read the new package, price and history).
+      const onTime =
+        `${result.promoted.package_start_date}`.slice(0, 10) === monthStartKey;
+      for (const key of Object.keys(student)) {
+        delete (student as unknown as Record<string, unknown>)[key];
       }
-      if (plan.schedule) {
-        student.schedule = plan.schedule;
-      }
-      if (plan.remaining.length > 0) {
-        student.pending_changes = plan.remaining;
-      } else {
-        delete student.pending_changes;
-      }
-      for (const field of LEGACY_PENDING_FIELDS) {
-        delete (student as unknown as Record<string, unknown>)[field];
-      }
+      Object.assign(student, result.promoted);
       promotedContactIds.add(student.contact_id);
       if (onTime) {
         promotedOnTime.push(student);
@@ -351,14 +332,20 @@ export class AutoRenewService {
     year: number,
     month: number,
   ): Session[] {
-    return buildTutoringMonthSessions({
-      student,
-      slots: student.schedule ?? [],
-      tutorNameById: (id) => contacts.find((c) => c.id === id)?.first_name,
-      year,
-      month,
-      notAfter: keyOf(student.service_end_date),
-    });
+    const seriesIdByTutor = new Map<string, string>();
+    const sessions: Session[] = [];
+    for (const segment of scheduleSegmentsForMonth(student, year, month)) {
+      const built = buildTutoringSegmentSessions(segment, {
+        student,
+        tutorNameById: (id) => contacts.find((c) => c.id === id)?.first_name,
+        year,
+        month,
+        seriesIdByTutor,
+      });
+      for (const s of built) seriesIdByTutor.set(s.tutor_id, s.series_id!);
+      sessions.push(...built);
+    }
+    return sessions;
   }
 
   private monthKey(year: number, month: number): string {

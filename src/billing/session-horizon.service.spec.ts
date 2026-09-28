@@ -62,6 +62,7 @@ describe('SessionHorizonService', () => {
   // Oct: Mon 5,12,19,26 + Wed 7,14,21,28 = 8; Nov: Mon 2,9,16,23,30 + Wed 4,11,18,25 = 9;
   // Dec: Mon 7,14,21,28 + Wed 2,9,16,23,30 = 9 → 26.
   const serviceEnd = { applyServiceEnds: jest.fn() };
+  const promotion = { promoteDueChanges: jest.fn() };
   const now = new Date(2026, 8, 14, 7, 0, 0);
   const allCreated = (): Session[] =>
     sessions.createSessions.mock.calls.flatMap((c) => c[0] as Session[]);
@@ -76,7 +77,9 @@ describe('SessionHorizonService', () => {
       contacts as any,
       billing as any,
       serviceEnd as any,
+      promotion as any,
     );
+    promotion.promoteDueChanges.mockResolvedValue({ studentsPromoted: 0 });
     serviceEnd.applyServiceEnds.mockResolvedValue({
       studentsEnded: 0,
       sessionsDeleted: 0,
@@ -459,6 +462,161 @@ describe('SessionHorizonService', () => {
       const res = await service.fillHorizon(now);
       expect(res.sessionsCreated).toBe(0);
       expect(res.studentsFilled).toBe(0);
+    });
+  });
+
+  describe('package changes on any date', () => {
+    const friday = [
+      { weekday: 'FRIDAY', start_time: '09:00', end_time: '09:30' },
+    ];
+    const days = (): string[] =>
+      allCreated()
+        .map((s) => s.start_datetime.slice(0, 10))
+        .sort();
+
+    it('promotes due changes before service ends and the fill, only on the locked run', async () => {
+      await service.fillHorizon(now, { lock: true });
+      expect(promotion.promoteDueChanges).toHaveBeenCalledWith(now);
+      expect(
+        promotion.promoteDueChanges.mock.invocationCallOrder[0],
+      ).toBeLessThan(serviceEnd.applyServiceEnds.mock.invocationCallOrder[0]);
+      promotion.promoteDueChanges.mockClear();
+      await service.fillHorizon(now, { lock: false });
+      await service.fillHorizon(now, { studentId: 's-1' });
+      expect(promotion.promoteDueChanges).not.toHaveBeenCalled();
+    });
+
+    it('a promotion failure never blocks the fill', async () => {
+      promotion.promoteDueChanges.mockRejectedValue(new Error('boom'));
+      const res = await service.fillHorizon(now, { lock: true });
+      expect(serviceEnd.applyServiceEnds).toHaveBeenCalled();
+      expect(res.sessionsCreated).toBe(26);
+    });
+
+    it('switches the slots on the change date inside a month', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-10-14', schedule: friday },
+          ],
+        }),
+      ]);
+      await service.fillHorizon(now);
+      const october = days().filter((d) => d.startsWith('2026-10'));
+      // Old slots to Oct 13 (Mon 5, 12 + Wed 7); Fridays from Oct 14.
+      expect(october).toEqual([
+        '2026-10-05',
+        '2026-10-07',
+        '2026-10-12',
+        '2026-10-16',
+        '2026-10-23',
+        '2026-10-30',
+      ]);
+      // November and December are all Fridays: 4 + 4.
+      expect(days().filter((d) => d > '2026-10-31')).toHaveLength(8);
+    });
+
+    it('fills each stretch on its own: one already generated, the other not', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-10-14', schedule: friday },
+          ],
+        }),
+      ]);
+      // The first half of October exists; the admin just reset the stretch
+      // from the change date (pending-schedule save).
+      sessions.getAllSessions.mockResolvedValue([
+        tutoring({ start_datetime: '2026-10-05T14:00:00.000Z' }),
+      ]);
+      await service.fillHorizon(now);
+      expect(days().filter((d) => d.startsWith('2026-10'))).toEqual([
+        '2026-10-16',
+        '2026-10-23',
+        '2026-10-30',
+      ]);
+    });
+
+    it('reads a session by its Eastern date', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-10-14', schedule: friday },
+          ],
+        }),
+      ]);
+      // 01:00 UTC on Oct 14 is 9pm on Oct 13 in New York: the OLD stretch.
+      sessions.getAllSessions.mockResolvedValue([
+        tutoring({ start_datetime: '2026-10-14T01:00:00.000Z' }),
+      ]);
+      await service.fillHorizon(now);
+      expect(days().filter((d) => d.startsWith('2026-10'))).toEqual([
+        '2026-10-16',
+        '2026-10-23',
+        '2026-10-30',
+      ]);
+    });
+
+    it('a change without a schedule leaves its stretch empty and is counted', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          pending_changes: [{ package: 'Excel', effective: '2026-10-14' }],
+        }),
+      ]);
+      const res = await service.fillHorizon(now);
+      expect(days()).toEqual(['2026-10-05', '2026-10-07', '2026-10-12']);
+      // The rest of October, all of November and December.
+      expect(res.monthsSkippedNoSchedule).toBe(3);
+    });
+
+    describe('current month', () => {
+      it('never touches the running schedule', async () => {
+        const res = await service.fillHorizon(now);
+        expect(days().some((d) => d.startsWith('2026-09'))).toBe(false);
+        expect(res.sessionsCreated).toBe(26);
+      });
+
+      it('fills a change landing later this month', async () => {
+        students.getStudents.mockResolvedValue([
+          student({
+            pending_changes: [
+              { package: 'Excel', effective: '2026-09-21', schedule: friday },
+            ],
+          }),
+        ]);
+        await service.fillHorizon(now);
+        expect(days().filter((d) => d.startsWith('2026-09'))).toEqual([
+          '2026-09-25',
+        ]);
+      });
+
+      it('fills a stretch that starts today (a change promoted this morning)', async () => {
+        students.getStudents.mockResolvedValue([
+          student({ package_start_date: '2026-09-14T00:00:00' }),
+        ]);
+        await service.fillHorizon(now);
+        // Mon 14, 21, 28 + Wed 16, 23, 30.
+        expect(days().filter((d) => d.startsWith('2026-09'))).toHaveLength(6);
+      });
+
+      it('leaves a stretch that started yesterday alone', async () => {
+        students.getStudents.mockResolvedValue([
+          student({ package_start_date: '2026-09-13T00:00:00' }),
+        ]);
+        await service.fillHorizon(now);
+        expect(days().some((d) => d.startsWith('2026-09'))).toBe(false);
+      });
+
+      it('skips a stretch the app already generated', async () => {
+        students.getStudents.mockResolvedValue([
+          student({ package_start_date: '2026-09-21T00:00:00' }),
+        ]);
+        sessions.getAllSessions.mockResolvedValue([
+          tutoring({ start_datetime: '2026-09-23T14:00:00.000Z' }),
+        ]);
+        await service.fillHorizon(now);
+        expect(days().some((d) => d.startsWith('2026-09'))).toBe(false);
+      });
     });
   });
 });

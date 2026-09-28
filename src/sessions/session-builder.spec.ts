@@ -1,10 +1,11 @@
 import {
   buildGroupRollSessions,
   buildTutoringMonthSessions,
-  governingSlotsForMonth,
+  buildTutoringSegmentSessions,
   GROUP_SESSION_MINUTES,
   HORIZON_MONTHS_AHEAD,
   normalizeMonth,
+  scheduleSegmentsForMonth,
 } from './session-builder';
 import { Session, SessionType } from '../models/session.model';
 import { Student } from '../models/student.model';
@@ -235,64 +236,170 @@ describe('session-builder', () => {
     });
   });
 
-  describe('governingSlotsForMonth', () => {
+  describe('scheduleSegmentsForMonth', () => {
     const current = student().schedule!;
     const friday = [
       { weekday: 'FRIDAY', start_time: '09:00', end_time: '10:00' },
     ];
+    const segments = (s: Student, month: number, year = 2026) =>
+      scheduleSegmentsForMonth(s, year, month);
 
-    it('uses the current schedule when no change is scheduled', () => {
-      expect(governingSlotsForMonth(student(), '2026-10-01')).toEqual(current);
-      expect(
-        governingSlotsForMonth(student({ schedule: undefined }), '2026-10-01'),
-      ).toEqual([]);
+    it('is one whole-month stretch on the current schedule', () => {
+      expect(segments(student(), 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-31' },
+      ]);
+      expect(segments(student({ schedule: undefined }), 9)).toEqual([
+        { slots: [], from: '2026-10-01', to: '2026-10-31' },
+      ]);
+      expect(segments(student(), 1, 2027)).toEqual([
+        { slots: current, from: '2027-02-01', to: '2027-02-28' },
+      ]);
     });
 
-    it('uses the current schedule for months before the change', () => {
+    it('normalises an overflowed month', () => {
+      expect(segments(student(), 12)).toEqual([
+        { slots: current, from: '2027-01-01', to: '2027-01-31' },
+      ]);
+    });
+
+    it('starts at the package start date in its month and skips earlier months', () => {
+      const s = student({ package_start_date: '2026-10-14T00:00:00' });
+      expect(segments(s, 9)).toEqual([
+        { slots: current, from: '2026-10-14', to: '2026-10-31' },
+      ]);
+      expect(segments(s, 8)).toEqual([]);
+      expect(segments(s, 10)[0].from).toBe('2026-11-01');
+    });
+
+    it('a student without a start date is open from the 1st', () => {
+      expect(
+        segments(student({ package_start_date: undefined }), 9)[0].from,
+      ).toBe('2026-10-01');
+    });
+
+    it('a change on the 1st governs its whole month', () => {
       const s = student({
         pending_changes: [
           { package: 'Excel', effective: '2026-11-01', schedule: friday },
         ],
       });
-      expect(governingSlotsForMonth(s, '2026-10-01')).toEqual(current);
+      expect(segments(s, 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-31' },
+      ]);
+      expect(segments(s, 10)).toEqual([
+        { slots: friday, from: '2026-11-01', to: '2026-11-30' },
+      ]);
+      expect(segments(s, 11)).toEqual([
+        { slots: friday, from: '2026-12-01', to: '2026-12-31' },
+      ]);
     });
 
-    it("uses the change's schedule from its effective month on", () => {
+    it('a mid-month change switches the slots ON its date', () => {
       const s = student({
         pending_changes: [
-          { package: 'Excel', effective: '2026-11-01', schedule: friday },
+          { package: 'Excel', effective: '2026-10-14', schedule: friday },
         ],
       });
-      expect(governingSlotsForMonth(s, '2026-11-01')).toEqual(friday);
-      expect(governingSlotsForMonth(s, '2026-12-01')).toEqual(friday);
+      expect(segments(s, 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-13' },
+        { slots: friday, from: '2026-10-14', to: '2026-10-31' },
+      ]);
     });
 
-    it('returns null (leave empty) when the governing change has no schedule', () => {
+    it('a change without a schedule leaves its stretch empty', () => {
+      for (const schedule of [undefined, []]) {
+        const s = student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-10-14', schedule },
+          ],
+        });
+        expect(segments(s, 9)).toEqual([
+          { slots: current, from: '2026-10-01', to: '2026-10-13' },
+          { slots: null, from: '2026-10-14', to: '2026-10-31' },
+        ]);
+      }
+    });
+
+    it('chains several changes, each ending the day before the next', () => {
       const s = student({
-        pending_changes: [{ package: 'Excel', effective: '2026-11-01' }],
+        pending_changes: [
+          { package: 'Achieve', effective: '2026-10-20', schedule: friday },
+          { package: 'Excel', effective: '2026-10-10' },
+          { package: 'Thrive', effective: '2026-11-05', schedule: current },
+        ],
       });
-      expect(governingSlotsForMonth(s, '2026-11-01')).toBeNull();
+      expect(segments(s, 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-09' },
+        { slots: null, from: '2026-10-10', to: '2026-10-19' },
+        { slots: friday, from: '2026-10-20', to: '2026-10-31' },
+      ]);
+      expect(segments(s, 10)).toEqual([
+        { slots: friday, from: '2026-11-01', to: '2026-11-04' },
+        { slots: current, from: '2026-11-05', to: '2026-11-30' },
+      ]);
+    });
+
+    it('cuts everything off at the service end date', () => {
+      const s = student({
+        service_end_date: '2026-10-20',
+        pending_changes: [
+          { package: 'Excel', effective: '2026-10-14', schedule: friday },
+          { package: 'Thrive', effective: '2026-10-25', schedule: current },
+        ],
+      });
+      expect(segments(s, 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-13' },
+        { slots: friday, from: '2026-10-14', to: '2026-10-20' },
+      ]);
+      expect(segments(s, 10)).toEqual([]);
+      expect(segments(student({ service_end_date: '2026-10-01' }), 9)).toEqual([
+        { slots: current, from: '2026-10-01', to: '2026-10-01' },
+      ]);
+    });
+  });
+
+  describe('buildTutoringSegmentSessions', () => {
+    const input = { student: student(), tutorNameById, year: 2026, month: 9 };
+    const friday = [
+      { weekday: 'FRIDAY', start_time: '09:00', end_time: '10:00' },
+    ];
+
+    it('builds only the days inside the stretch, both ends included', () => {
+      // October 2026 Fridays: 2, 9, 16, 23, 30.
+      const out = buildTutoringSegmentSessions(
+        { slots: friday, from: '2026-10-16', to: '2026-10-23' },
+        input,
+      );
+      expect(out.map((s) => s.start_datetime.slice(0, 10))).toEqual([
+        '2026-10-16',
+        '2026-10-23',
+      ]);
+      expect(out[0].status).toBe('Pending');
+      expect(out[0].tutor_name).toBe('Tess');
+    });
+
+    it('reuses a supplied series id', () => {
+      const out = buildTutoringSegmentSessions(
+        { slots: friday, from: '2026-10-01', to: '2026-10-31' },
+        { ...input, seriesIdByTutor: new Map([['t-1', 'series-A']]) },
+      );
+      expect(out).toHaveLength(5);
+      expect(out.every((s) => s.series_id === 'series-A')).toBe(true);
+    });
+
+    it('builds nothing for an empty or unset schedule', () => {
       expect(
-        governingSlotsForMonth(
-          student({
-            pending_changes: [
-              { package: 'Excel', effective: '2026-11-01', schedule: [] },
-            ],
-          }),
-          '2026-11-01',
+        buildTutoringSegmentSessions(
+          { slots: null, from: '2026-10-01', to: '2026-10-31' },
+          input,
         ),
-      ).toBeNull();
-    });
-
-    it('lets the last reached change win', () => {
-      const s = student({
-        pending_changes: [
-          { package: 'Excel', effective: '2026-11-01' },
-          { package: 'Achieve', effective: '2026-12-01', schedule: friday },
-        ],
-      });
-      expect(governingSlotsForMonth(s, '2026-11-01')).toBeNull();
-      expect(governingSlotsForMonth(s, '2026-12-01')).toEqual(friday);
+      ).toEqual([]);
+      expect(
+        buildTutoringSegmentSessions(
+          { slots: [], from: '2026-10-01', to: '2026-10-31' },
+          input,
+        ),
+      ).toEqual([]);
     });
   });
 });

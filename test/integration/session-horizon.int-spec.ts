@@ -5,6 +5,7 @@ import { SessionHorizonController } from '../../src/billing/session-horizon.cont
 import { SessionHorizonService } from '../../src/billing/session-horizon.service';
 import { BillingService } from '../../src/billing/billing.service';
 import { ServiceEndService } from '../../src/billing/service-end.service';
+import { PackagePromotionService } from '../../src/billing/package-promotion.service';
 import { StudentsService } from '../../src/students/students.service';
 import { SessionsService } from '../../src/sessions/sessions.service';
 import { ContactsService } from '../../src/contacts/contacts.service';
@@ -52,6 +53,7 @@ describe('Session horizon fill (integration)', () => {
       providers: [
         SessionHorizonService,
         ServiceEndService,
+        PackagePromotionService,
         BillingService,
         StudentsService,
         SessionsService,

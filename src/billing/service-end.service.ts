@@ -5,32 +5,15 @@ import { Student } from '../models/student.model';
 import { Session, SessionType } from '../models/session.model';
 import { STUDENT_STATUS } from '../students/student-status';
 import { PENDING_STATUS } from '../sessions/session-builder';
-import { easternSlotToUtc } from './eastern-time';
-import { keyOf } from './statement-engine';
+import { dayAfterStartIso, easternDateKey, keyOf } from './eastern-time';
+
+export { dayAfterStartIso, easternDateKey };
 
 export interface ServiceEndResult {
   /** Students moved to their end status. */
   studentsEnded: number;
   /** Pending tutoring sessions removed from after an end date. */
   sessionsDeleted: number;
-}
-
-const easternDate = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-
-/** The Eastern calendar date ('YYYY-MM-DD') of an instant. */
-export function easternDateKey(at: Date): string {
-  return easternDate.format(at);
-}
-
-/** The UTC instant the Eastern day AFTER a 'YYYY-MM-DD' key begins. */
-export function dayAfterStartIso(key: string): string {
-  const [y, m, d] = key.split('-').map(Number);
-  return easternSlotToUtc(y, m - 1, d + 1, '00:00').toISOString();
 }
 
 /**

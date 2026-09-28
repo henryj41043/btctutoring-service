@@ -220,6 +220,28 @@ describe('PackageChangeNoticeService', () => {
     );
   });
 
+  it('mentions a custom price set for the new package and the proration', async () => {
+    studentsService.getStudents.mockResolvedValue([
+      student({ pending_changes: [change({ price_override: 300 })] }),
+    ] as never);
+    await service.sendPackageChangeNotices();
+    const body = bodyTo('ada@x.com');
+    expect(body).toContain('New package: Excel (custom price $300/mo)');
+    expect(body).toContain(
+      'Billing switches to the new package from the effective date, prorated automatically.',
+    );
+  });
+
+  it('shows a $0 custom price and leaves a Custom package description alone', async () => {
+    studentsService.getStudents.mockResolvedValue([
+      student({ pending_changes: [change({ price_override: 0 })] }),
+    ] as never);
+    await service.sendPackageChangeNotices();
+    expect(bodyTo('ada@x.com')).toContain(
+      'New package: Excel (custom price $0/mo)',
+    );
+  });
+
   it('includes slot tutors of the CURRENT schedule and dedupes an assigned tutor who is also a slot tutor', async () => {
     studentsService.getStudents.mockResolvedValue([
       student({

@@ -125,6 +125,44 @@ describe('Students & Notes (integration, admin-only)', () => {
       );
     });
 
+    it('admin schedules a package change on any future date, with a price', async () => {
+      const soon = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      StudentModel.update.mockResolvedValue({ id: 's-1' });
+      StudentModel.get.mockResolvedValue({ id: 's-1' });
+      const res = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({
+          id: 's-1',
+          pending_changes: [
+            { package: 'Excel', effective: soon, price_override: 300 },
+          ],
+        });
+      expect(res.status).toBe(200);
+      const update = StudentModel.update.mock.calls.at(-1)![1] as {
+        $SET: { pending_changes: unknown[] };
+      };
+      expect(update.$SET.pending_changes).toEqual([
+        { package: 'Excel', effective: soon, price_override: 300 },
+      ]);
+    });
+
+    it('rejects a package change dated in the past', async () => {
+      StudentModel.update.mockClear();
+      StudentModel.get.mockResolvedValue({ id: 's-1' });
+      const res = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({
+          id: 's-1',
+          pending_changes: [{ package: 'Excel', effective: '2020-01-15' }],
+        });
+      expect(res.status).toBe(400);
+      expect(StudentModel.update).not.toHaveBeenCalled();
+    });
+
     it('rejects a discount above 100 percent', async () => {
       StudentModel.update.mockClear();
       const res = await request(server())

@@ -1,7 +1,14 @@
 import { randomUUID } from 'crypto';
 import { Session, SessionType } from '../models/session.model';
 import { ScheduleSlot, Student } from '../models/student.model';
-import { easternSlotToUtc, utcToEasternWall } from '../billing/eastern-time';
+import {
+  dateKey,
+  dayBefore,
+  easternSlotToUtc,
+  keyOf,
+  lastDayOfMonth,
+  utcToEasternWall,
+} from '../billing/eastern-time';
 import { pendingChangesOf } from '../students/pending-changes';
 
 /**
@@ -42,9 +49,6 @@ export interface TutoringMonthInput {
    *  edits stay continuous across month boundaries; minted when absent. */
   seriesIdByTutor?: Map<string, string>;
 }
-
-const dayKey = (year: number, month: number, day: number): string =>
-  `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
 /** Normalises a possibly-overflowed (year, month) pair. */
 export function normalizeMonth(
@@ -93,7 +97,8 @@ export function buildTutoringMonthSessions(
       const date = new Date(year, month, day);
       if (WEEKDAY_BY_JS_DAY[date.getDay()] !== slot.weekday) continue;
       if (cutoff && date < cutoff) continue;
-      if (input.notAfter && dayKey(year, month, day) > input.notAfter) continue;
+      if (input.notAfter && dateKey(year, month, day) > input.notAfter)
+        continue;
       sessions.push({
         type: SessionType.TUTORING,
         start_datetime: easternSlotToUtc(
@@ -157,21 +162,81 @@ export function buildGroupRollSessions(
   return sessions;
 }
 
+/** A stretch of one month governed by one weekly schedule (both days inclusive). */
+export interface ScheduleSegment {
+  /** null = a scheduled change with no schedule yet: the stretch stays EMPTY. */
+  slots: ScheduleSlot[] | null;
+  from: string; // 'YYYY-MM-DD'
+  to: string; // 'YYYY-MM-DD'
+}
+
 /**
- * The slots that govern a month: the last scheduled package change effective
- * on or before the month start wins — its own schedule when one was set,
- * otherwise `null` (the month must stay EMPTY until an admin sets the
- * schedule or the 1st-of-month promotion applies its fallback). With no
- * governing change the student's current schedule applies.
+ * The schedule stretches of one month, oldest first: the student's current
+ * schedule from its start date until the day before the first scheduled
+ * change, then each change from its effective date until the day before
+ * the next. Everything is clipped to the month and to the service end date.
+ * A change with its own schedule switches the slots ON its effective date;
+ * one without leaves its stretch empty until an admin sets the schedule or
+ * the change is promoted (the old schedule then carries on).
  */
-export function governingSlotsForMonth(
+export function scheduleSegmentsForMonth(
   student: Student,
-  monthStartKey: string,
-): ScheduleSlot[] | null {
-  const reached = pendingChangesOf(student).filter(
-    (c) => c.effective <= monthStartKey,
-  );
-  const governing = reached[reached.length - 1];
-  if (!governing) return student.schedule ?? [];
-  return governing.schedule?.length ? governing.schedule : null;
+  inputYear: number,
+  inputMonth: number,
+): ScheduleSegment[] {
+  const { year, month } = normalizeMonth(inputYear, inputMonth);
+  const monthStart = dateKey(year, month, 1);
+  const monthEnd = lastDayOfMonth(year, month);
+  const serviceEnd = keyOf(student.service_end_date);
+  const changes = pendingChangesOf(student);
+
+  const stretches: {
+    slots: ScheduleSlot[] | null;
+    start?: string;
+    end?: string;
+  }[] = [];
+  stretches.push({
+    slots: student.schedule ?? [],
+    start: keyOf(student.package_start_date),
+    end: changes[0] ? dayBefore(changes[0].effective.slice(0, 10)) : undefined,
+  });
+  changes.forEach((change, i) => {
+    const next = changes[i + 1];
+    stretches.push({
+      slots: change.schedule?.length ? change.schedule : null,
+      start: change.effective.slice(0, 10),
+      end: next ? dayBefore(next.effective.slice(0, 10)) : undefined,
+    });
+  });
+
+  const segments: ScheduleSegment[] = [];
+  for (const stretch of stretches) {
+    const from =
+      stretch.start && stretch.start > monthStart ? stretch.start : monthStart;
+    let to = stretch.end && stretch.end < monthEnd ? stretch.end : monthEnd;
+    if (serviceEnd && serviceEnd < to) to = serviceEnd;
+    if (from > to) continue;
+    segments.push({ slots: stretch.slots, from, to });
+  }
+  return segments;
+}
+
+/** A 'YYYY-MM-DD' key as a local Date (for notBefore). */
+function localDate(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** One segment's PENDING tutoring sessions (nothing for an empty stretch). */
+export function buildTutoringSegmentSessions(
+  segment: ScheduleSegment,
+  input: Omit<TutoringMonthInput, 'slots' | 'notBefore' | 'notAfter'>,
+): Session[] {
+  if (!segment.slots || segment.slots.length === 0) return [];
+  return buildTutoringMonthSessions({
+    ...input,
+    slots: segment.slots,
+    notBefore: localDate(segment.from),
+    notAfter: segment.to,
+  });
 }

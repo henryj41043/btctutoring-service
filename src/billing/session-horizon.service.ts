@@ -7,18 +7,17 @@ import { BillingService } from './billing.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
-import { easternSlotToUtc } from './eastern-time';
-import { monthKey } from './billing-amount';
+import { dateKey, easternDateKey, easternSlotToUtc } from './eastern-time';
+import { PackagePromotionService } from './package-promotion.service';
 import { ServiceEndService } from './service-end.service';
-import { keyOf } from './statement-engine';
 import { STUDENT_STATUS } from '../students/student-status';
 import {
   buildGroupRollSessions,
-  buildTutoringMonthSessions,
-  governingSlotsForMonth,
+  buildTutoringSegmentSessions,
   HORIZON_MONTHS_AHEAD,
   normalizeMonth,
   PENDING_STATUS,
+  scheduleSegmentsForMonth,
 } from '../sessions/session-builder';
 
 export interface HorizonFillOptions {
@@ -61,6 +60,7 @@ export class SessionHorizonService {
     private readonly contacts: ContactsService,
     private readonly billing: BillingService,
     private readonly serviceEnd: ServiceEndService,
+    private readonly promotion: PackagePromotionService,
   ) {}
 
   // 07:00 UTC daily — an hour after the 1st-of-month promotion run.
@@ -90,6 +90,11 @@ export class SessionHorizonService {
     }
 
     if (opts.lock) {
+      // Scheduled package changes due today become current first, so the
+      // fill below reads each student's new package and schedule.
+      await this.promotion.promoteDueChanges(now).catch((err: Error) => {
+        this.logger.error(`Package promotions failed: ${err.message}`);
+      });
       // Ended students leave Active (and lose their later sessions) BEFORE
       // the fill decides who is eligible. A failure never blocks the fill.
       await this.serviceEnd.applyServiceEnds(now).catch((err: Error) => {
@@ -132,18 +137,18 @@ export class SessionHorizonService {
       return idx;
     };
 
-    // Buckets: tutoring months per student, latest series per (student, tutor),
-    // and group sessions per series.
-    const tutoringMonths = new Map<string, Set<number>>();
+    // Buckets: tutoring days (Eastern dates) per student, latest series per
+    // (student, tutor), and group sessions per series.
+    const tutoringDays = new Map<string, Set<string>>();
     const seriesByStudent = new Map<string, Map<string, SeriesRef>>();
     const groupBySeries = new Map<string, Session[]>();
     for (const s of windowSessions) {
       const idx = monthIndexOf(s.start_datetime ?? '');
       if (idx < 0) continue;
       if (s.type === SessionType.TUTORING && s.student_id) {
-        let months = tutoringMonths.get(s.student_id);
-        if (!months) tutoringMonths.set(s.student_id, (months = new Set()));
-        months.add(idx);
+        let days = tutoringDays.get(s.student_id);
+        if (!days) tutoringDays.set(s.student_id, (days = new Set()));
+        days.add(easternDateKey(new Date(s.start_datetime)));
         if (s.series_id && s.tutor_id) {
           let byTutor = seriesByStudent.get(s.student_id);
           if (!byTutor)
@@ -166,13 +171,10 @@ export class SessionHorizonService {
       }
     }
 
+    const todayKey = dateKey(year, month, now.getDate());
     for (const student of students) {
       if (!this.isEligible(student)) continue;
-      const start = new Date(student.package_start_date!);
-      const startKey = monthKey(start.getFullYear(), start.getMonth());
-      // The last day of service: nothing is generated past it.
-      const endDate = keyOf(student.service_end_date);
-      const months = tutoringMonths.get(student.id!) ?? new Set<number>();
+      const days = tutoringDays.get(student.id!) ?? new Set<string>();
       const seriesIdByTutor = new Map<string, string>(
         [
           ...(seriesByStudent.get(student.id!) ?? new Map<string, SeriesRef>()),
@@ -180,32 +182,41 @@ export class SessionHorizonService {
       );
       let created = 0;
       try {
-        for (let i = 1; i <= HORIZON_MONTHS_AHEAD; i++) {
+        for (let i = 0; i <= HORIZON_MONTHS_AHEAD; i++) {
           const target = normalizeMonth(year, month + i);
-          const key = monthKey(target.year, target.month);
-          if (key < startKey) continue;
-          if (endDate && key > endDate.slice(0, 7)) continue;
-          if (months.has(i)) continue;
-          const slots = governingSlotsForMonth(student, `${key}-01`);
-          if (slots === null) {
-            result.monthsSkippedNoSchedule++;
-            continue;
-          }
-          const built = buildTutoringMonthSessions({
+          const segments = scheduleSegmentsForMonth(
             student,
-            slots,
-            tutorNameById,
-            year: target.year,
-            month: target.month,
-            notBefore: key === startKey ? start : undefined,
-            notAfter: endDate,
-            seriesIdByTutor,
-          });
-          if (built.length === 0) continue;
-          await this.sessions.createSessions(built);
-          created += built.length;
-          months.add(i);
-          for (const s of built) seriesIdByTutor.set(s.tutor_id, s.series_id!);
+            target.year,
+            target.month,
+          );
+          for (const segment of segments) {
+            // The current month belongs to the app's rest-of-month
+            // generation: only a stretch that STARTS today or later (a
+            // change landing this month) is filled here, so a session an
+            // admin deleted from the running schedule never comes back.
+            if (i === 0 && segment.from < todayKey) continue;
+            // Idempotent per stretch: any tutoring session inside it (even
+            // a cancelled one) means it was generated already.
+            if (this.hasDayWithin(days, segment.from, segment.to)) continue;
+            if (segment.slots === null) {
+              result.monthsSkippedNoSchedule++;
+              continue;
+            }
+            const built = buildTutoringSegmentSessions(segment, {
+              student,
+              tutorNameById,
+              year: target.year,
+              month: target.month,
+              seriesIdByTutor,
+            });
+            if (built.length === 0) continue;
+            await this.sessions.createSessions(built);
+            created += built.length;
+            for (const s of built) {
+              days.add(easternDateKey(new Date(s.start_datetime)));
+              seriesIdByTutor.set(s.tutor_id, s.series_id!);
+            }
+          }
         }
       } catch (err) {
         this.logger.error(
@@ -239,6 +250,13 @@ export class SessionHorizonService {
         `${result.monthsSkippedNoSchedule} month(s) awaiting a schedule.`,
     );
     return result;
+  }
+
+  private hasDayWithin(days: Set<string>, from: string, to: string): boolean {
+    for (const day of days) {
+      if (day >= from && day <= to) return true;
+    }
+    return false;
   }
 
   private isEligible(student: Student): boolean {
