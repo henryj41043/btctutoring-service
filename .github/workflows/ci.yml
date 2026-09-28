@@ -26,7 +26,8 @@ jobs:
         run: npm run test:e2e
 
   mutation:
-    name: Mutation testing (changed lines only)
+    # The name is a required status check on main: keep it as is.
+    name: Mutation testing (changed files only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

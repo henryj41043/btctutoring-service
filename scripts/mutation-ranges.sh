@@ -9,8 +9,9 @@
 set -euo pipefail
 BASE="$1"; HEAD="${2:-HEAD}"
 EXCLUDE="${MUTATION_EXCLUDE:-\.spec\.ts$|/models/|/schemas/|/dto/|\.module\.ts$|/main\.ts$}"
-git diff --name-only --diff-filter=AM "$BASE"..."$HEAD" -- src \
-  | grep -E "\.ts$" | grep -vE "$EXCLUDE" \
+# grep exits 1 when nothing matches (a PR with no source change): not an error.
+{ git diff --name-only --diff-filter=AM "$BASE"..."$HEAD" -- src \
+    | grep -E "\.ts$" | grep -vE "$EXCLUDE" || true; } \
   | while read -r file; do
       git diff -U0 "$BASE"..."$HEAD" -- "$file" \
         | sed -n "s/^@@ -[0-9,]* +\([0-9]*\),\{0,1\}\([0-9]*\) @@.*/\1 \2/p" \
