@@ -4,8 +4,9 @@
  * Written by the infra repo's parser Lambda; this service only reads and
  * moderates (assign/discard). `id` is a content hash of the ORIGINAL email
  * (normalized subject + sender + date-to-minute + body fingerprint), so a
- * re-forwarded thread dedups by construction — which is also why discard
+ * re-forwarded email dedups by construction — which is also why discard
  * keeps the row: the resident hash stops discarded content resurfacing.
+ * A conversation hashes its whole text, so a longer re-forward is a new entry.
  */
 export class EmailEntry {
   id?: string;
@@ -20,7 +21,10 @@ export class EmailEntry {
   sent_at?: string;
   /** When the pipeline received the forward (ISO). */
   received_at?: string;
-  /** Quoted-history-stripped newest message only. */
+  /**
+   * A single email: the newest message with the quoted history stripped.
+   * A conversation: every message, oldest first, under sender/date lines.
+   */
   body_text?: string;
   /** Raw MIME object in the inbound bucket — the "view original" target. */
   s3_key?: string;
@@ -31,4 +35,14 @@ export class EmailEntry {
   assigned_by?: string;
   assigned_at?: string;
   created_at?: string;
+  /** True when the forward held a conversation (more than one message). */
+  is_thread?: boolean;
+  message_count?: number;
+  /** Everyone found in the conversation's From/To/Cc lines. */
+  participants?: EmailParticipant[];
+}
+
+export class EmailParticipant {
+  email: string;
+  name?: string;
 }
