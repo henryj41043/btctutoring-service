@@ -13,6 +13,7 @@ describe('AutoRenewService', () => {
     createBillingRecordIfAbsent: jest.fn(),
   };
   const packages = { getCatalog: jest.fn() };
+  const statements = { freezeMonth: jest.fn() };
 
   const student = (over: Partial<Student> = {}): Student =>
     ({
@@ -49,7 +50,9 @@ describe('AutoRenewService', () => {
       contacts as any,
       billing as any,
       packages as any,
+      statements as any,
     );
+    statements.freezeMonth.mockResolvedValue({ month: '2026-06', frozen: 1 });
     packages.getCatalog.mockResolvedValue(TEST_CATALOG);
     billing.acquireLock.mockResolvedValue(true);
     billing.createBillingRecordIfAbsent.mockResolvedValue({
@@ -1023,6 +1026,55 @@ describe('AutoRenewService', () => {
       ]);
       await service.runAutoRenew(july);
       expect(amounts()).toEqual([['2026-07-01', 362]]);
+    });
+  });
+
+  describe('closing the month that just ended', () => {
+    it('freezes it first, from the students as loaded, before any promotion', async () => {
+      const loaded = student({
+        pending_changes: [{ package: 'Excel', effective: '2026-07-01' }],
+      });
+      students.getStudents.mockResolvedValue([loaded]);
+      let packageAtFreeze: string | undefined;
+      statements.freezeMonth.mockImplementation(
+        (_month: string, _now: Date, inputs: { students: Student[] }) => {
+          packageAtFreeze = inputs.students[0].package;
+          return Promise.resolve({ month: '2026-06', frozen: 1 });
+        },
+      );
+      await service.runAutoRenew(july);
+      expect(statements.freezeMonth).toHaveBeenCalledTimes(1);
+      const [month, now, inputs] = statements.freezeMonth.mock.calls[0];
+      expect(month).toBe('2026-06');
+      expect(now).toBe(july);
+      expect(inputs.contacts).toHaveLength(2);
+      expect(inputs.catalog).toBe(TEST_CATALOG);
+      // June is closed on the package the student was on in June.
+      expect(packageAtFreeze).toBe('Succeed');
+      expect(statements.freezeMonth.mock.invocationCallOrder[0]).toBeLessThan(
+        students.promotePendingChanges.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('closes December from a January run', async () => {
+      await service.runAutoRenew(new Date(2027, 0, 1));
+      expect(statements.freezeMonth.mock.calls[0][0]).toBe('2026-12');
+    });
+
+    it('a freeze failure never blocks the new month', async () => {
+      statements.freezeMonth.mockRejectedValue(new Error('boom'));
+      const result = await service.runAutoRenew(july);
+      expect(result.skipped).toBe(false);
+      expect(result.sessionsCreated).toBe(9);
+      expect(result.billingRecords).toBe(1);
+    });
+
+    it('does not freeze when the run is skipped', async () => {
+      billing.acquireLock.mockResolvedValue(false);
+      await service.runAutoRenew(july);
+      packages.getCatalog.mockResolvedValue({});
+      await service.runAutoRenew(july);
+      expect(statements.freezeMonth).not.toHaveBeenCalled();
     });
   });
 });

@@ -14,7 +14,11 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Statement } from './statement-engine';
-import { StatementPreviewRequest, StatementService } from './statement.service';
+import {
+  FreezeResult,
+  StatementPreviewRequest,
+  StatementService,
+} from './statement.service';
 
 /**
  * Billing v2 statements: what each family owes in a month, calculated by the
@@ -40,6 +44,18 @@ export class StatementController {
   ): Promise<Statement[]> {
     this.assertAdmin(req);
     return this.statements.getStatements(month);
+  }
+
+  /** Freezes a month that has ended (normally done by the 1st-of-month run). */
+  @Post('freeze')
+  @HttpCode(200)
+  @UseGuards(AuthGuard('jwt'))
+  async freeze(
+    @Request() req: express.Request,
+    @Query('month') month: string,
+  ): Promise<FreezeResult> {
+    this.assertAdmin(req);
+    return this.statements.freezeMonth(month);
   }
 
   /** The family's statement with an unsaved student change applied. */

@@ -135,11 +135,62 @@ describe('Billing statements (integration)', () => {
     expect(Students.__save).not.toHaveBeenCalled();
   });
 
+  it('admin freezes a closed month, then reads it back frozen', async () => {
+    scanResolves(Billing, []);
+    Billing.create.mockResolvedValue({});
+    const freeze = await request(server())
+      .post('/billing/statements/freeze?month=2026-01')
+      .set('x-test-role', 'admin');
+    expect(freeze.status).toBe(200);
+    expect(freeze.body).toEqual({ month: '2026-01', frozen: 0 });
+
+    const stored = JSON.stringify({
+      contact_id: 'c-1',
+      contact_name: 'Robin Reed',
+      month: '2026-01',
+      cycle: 'monthly',
+      lines: [],
+      total: 199,
+      dues: [
+        {
+          day: 1,
+          period_start: '2026-01-01',
+          derived: 199,
+          override: null,
+          amount: 199,
+          paid: false,
+        },
+      ],
+      total_due: 199,
+      flags: [],
+      frozen_at: '2026-02-01T06:00:00.000Z',
+    });
+    scanResolves(Billing, [{ id: 'stmt#c-1#2026-01', statement: stored }]);
+    const read = await request(server())
+      .get('/billing/statements?month=2026-01')
+      .set('x-test-role', 'admin');
+    expect(read.status).toBe(200);
+    expect(read.body[0].total).toBe(199);
+    expect(read.body[0].frozen_at).toBe('2026-02-01T06:00:00.000Z');
+  });
+
+  it('refuses to freeze a month that has not ended', async () => {
+    const res = await request(server())
+      .post('/billing/statements/freeze?month=2999-01')
+      .set('x-test-role', 'admin');
+    expect(res.status).toBe(400);
+    expect(Billing.create).not.toHaveBeenCalled();
+  });
+
   it('tutor is forbidden', async () => {
     const read = await request(server())
       .get('/billing/statements?month=2026-09')
       .set('x-test-role', 'tutor');
     expect(read.status).toBe(403);
+    const freeze = await request(server())
+      .post('/billing/statements/freeze?month=2026-01')
+      .set('x-test-role', 'tutor');
+    expect(freeze.status).toBe(403);
     const preview = await request(server())
       .post('/billing/statements/preview')
       .set('x-test-role', 'tutor')
