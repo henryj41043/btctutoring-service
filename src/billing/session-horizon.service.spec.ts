@@ -619,4 +619,36 @@ describe('SessionHorizonService', () => {
       });
     });
   });
+
+  describe('first-week sessions', () => {
+    it('builds the one-off session with a future start month, once', async () => {
+      const starter = student({
+        package_start_date: '2026-10-09T00:00:00',
+        first_week_sessions: [
+          { date: '2026-10-10', start_time: '11:00', end_time: '11:30' },
+        ],
+      });
+      students.getStudents.mockResolvedValue([starter]);
+      await service.fillHorizon(now);
+      const created = allCreated();
+      const october = created.filter((s) =>
+        s.start_datetime.startsWith('2026-10'),
+      );
+      // From Fri Oct 9: Mon 12, 19, 26 + Wed 14, 21, 28 = 6, plus Sat Oct 10.
+      expect(october).toHaveLength(7);
+      const oneOff = october.find((s) =>
+        s.start_datetime.startsWith('2026-10-10'),
+      )!;
+      expect(oneOff.series_id).toBeUndefined();
+      expect(created.filter((s) => !s.series_id)).toHaveLength(1);
+
+      // A second run sees the stretch filled and adds nothing.
+      sessions.createSessions.mockClear();
+      sessions.getAllSessions.mockResolvedValue(
+        created.map((s, i) => ({ ...s, id: `x-${i}` })),
+      );
+      const again = await service.fillHorizon(now);
+      expect(again.sessionsCreated).toBe(0);
+    });
+  });
 });

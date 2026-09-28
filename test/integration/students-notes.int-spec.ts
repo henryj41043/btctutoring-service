@@ -163,6 +163,42 @@ describe('Students & Notes (integration, admin-only)', () => {
       expect(StudentModel.update).not.toHaveBeenCalled();
     });
 
+    it('admin saves first-week sessions; one outside the start week is rejected', async () => {
+      StudentModel.update.mockResolvedValue({ id: 's-1' });
+      const oneOff = {
+        date: '2026-09-12',
+        start_time: '11:00',
+        end_time: '11:45',
+      };
+      const ok = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({
+          id: 's-1',
+          package_start_date: '2026-09-11T00:00:00',
+          first_week_sessions: [oneOff],
+        });
+      expect(ok.status).toBe(200);
+      expect(StudentModel.update).toHaveBeenLastCalledWith(
+        { id: 's-1' },
+        {
+          package_start_date: '2026-09-11T00:00:00',
+          first_week_sessions: [oneOff],
+        },
+      );
+      StudentModel.update.mockClear();
+      const bad = await request(server())
+        .put('/students')
+        .set('x-test-role', 'admin')
+        .send({
+          id: 's-1',
+          package_start_date: '2026-09-11T00:00:00',
+          first_week_sessions: [{ ...oneOff, date: '2026-09-25' }],
+        });
+      expect(bad.status).toBe(400);
+      expect(StudentModel.update).not.toHaveBeenCalled();
+    });
+
     it('rejects a discount above 100 percent', async () => {
       StudentModel.update.mockClear();
       const res = await request(server())

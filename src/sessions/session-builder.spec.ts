@@ -1,4 +1,5 @@
 import {
+  buildFirstWeekSessions,
   buildGroupRollSessions,
   buildTutoringMonthSessions,
   buildTutoringSegmentSessions,
@@ -398,6 +399,158 @@ describe('session-builder', () => {
         buildTutoringSegmentSessions(
           { slots: [], from: '2026-10-01', to: '2026-10-31' },
           input,
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('first-week sessions', () => {
+    const wedFri = [
+      { weekday: 'WEDNESDAY', start_time: '10:00', end_time: '10:45' },
+      { weekday: 'FRIDAY', start_time: '10:00', end_time: '10:45' },
+    ];
+    const saturday = {
+      date: '2026-09-12',
+      start_time: '11:00',
+      end_time: '11:45',
+    };
+    const starter = (over: Partial<Student> = {}): Student =>
+      student({
+        package_start_date: '2026-09-11T00:00:00',
+        schedule: wedFri,
+        first_week_sessions: [saturday],
+        ...over,
+      });
+
+    it('ride on the stretch that contains them', () => {
+      expect(scheduleSegmentsForMonth(starter(), 2026, 8)).toEqual([
+        {
+          slots: wedFri,
+          from: '2026-09-11',
+          to: '2026-09-30',
+          firstWeek: [saturday],
+        },
+      ]);
+      // A later month has none: the key is absent, not empty.
+      expect(scheduleSegmentsForMonth(starter(), 2026, 9)).toEqual([
+        { slots: wedFri, from: '2026-10-01', to: '2026-10-31' },
+      ]);
+    });
+
+    it('belong to the current schedule only, never to a scheduled change', () => {
+      const segments = scheduleSegmentsForMonth(
+        starter({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-09-12', schedule: wedFri },
+          ],
+        }),
+        2026,
+        8,
+      );
+      expect(segments).toEqual([
+        { slots: wedFri, from: '2026-09-11', to: '2026-09-11' },
+        { slots: wedFri, from: '2026-09-12', to: '2026-09-30' },
+      ]);
+    });
+
+    it('drop entries outside the stretch and malformed ones', () => {
+      const segments = scheduleSegmentsForMonth(
+        starter({
+          service_end_date: '2026-09-12',
+          first_week_sessions: [
+            { ...saturday, date: '2026-09-10' },
+            { ...saturday, date: '2026-09-11' },
+            saturday,
+            { ...saturday, date: '2026-09-13' },
+            null as never,
+            { ...saturday, date: 5 as unknown as string },
+          ],
+        }),
+        2026,
+        8,
+      );
+      expect(segments[0].firstWeek!.map((s) => s.date)).toEqual([
+        '2026-09-11',
+        '2026-09-12',
+      ]);
+    });
+
+    it('are built as plain pending sessions outside any series', () => {
+      const [segment] = scheduleSegmentsForMonth(starter(), 2026, 8);
+      const built = buildTutoringSegmentSessions(segment, {
+        student: starter(),
+        tutorNameById,
+        year: 2026,
+        month: 8,
+      });
+      // Fri 11, 18, 25 + Wed 16, 23, 30 = 6 regular, plus the Saturday.
+      expect(built).toHaveLength(7);
+      const oneOff = built[6];
+      expect(oneOff).toEqual({
+        type: SessionType.TUTORING,
+        // 11:00 Eastern in September (EDT, UTC-4).
+        start_datetime: '2026-09-12T15:00:00.000Z',
+        end_datetime: '2026-09-12T15:45:00.000Z',
+        status: 'Pending',
+        notes: '',
+        student_id: 's-1',
+        student_name: 'Pat',
+        tutor_id: 't-1',
+        tutor_name: 'Tess',
+      });
+      expect('series_id' in oneOff).toBe(false);
+      expect(built.slice(0, 6).every((s) => !!s.series_id)).toBe(true);
+    });
+
+    it('use their own tutor when one is set, and a blank name when unknown', () => {
+      const input = { student: starter(), tutorNameById };
+      const built = buildFirstWeekSessions(
+        {
+          slots: wedFri,
+          from: '2026-09-11',
+          to: '2026-09-30',
+          firstWeek: [
+            { ...saturday, tutor_id: 't-2' },
+            { ...saturday, tutor_id: 't-x' },
+          ],
+        },
+        input,
+      );
+      expect(built.map((s) => [s.tutor_id, s.tutor_name])).toEqual([
+        ['t-2', 'Theo'],
+        ['t-x', ''],
+      ]);
+    });
+
+    it('pin winter times to Eastern standard time', () => {
+      const built = buildFirstWeekSessions(
+        {
+          slots: wedFri,
+          from: '2026-12-01',
+          to: '2026-12-31',
+          firstWeek: [{ ...saturday, date: '2026-12-05' }],
+        },
+        { student: starter(), tutorNameById },
+      );
+      expect(built[0].start_datetime).toBe('2026-12-05T16:00:00.000Z');
+    });
+
+    it('build nothing without one-offs or without a schedule', () => {
+      expect(
+        buildFirstWeekSessions(
+          { slots: wedFri, from: '2026-09-11', to: '2026-09-30' },
+          { student: starter(), tutorNameById },
+        ),
+      ).toEqual([]);
+      expect(
+        buildTutoringSegmentSessions(
+          {
+            slots: [],
+            from: '2026-09-11',
+            to: '2026-09-30',
+            firstWeek: [saturday],
+          },
+          { student: starter(), tutorNameById, year: 2026, month: 8 },
         ),
       ).toEqual([]);
     });

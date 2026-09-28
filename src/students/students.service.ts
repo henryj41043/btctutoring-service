@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Student } from '../models/student.model';
+import { FirstWeekSession, Student } from '../models/student.model';
 import { StudentsModel } from '../models/students.model';
 import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
 import { OnboardingRow } from '../models/onboarding-row.model';
 import { STUDENT_STATUS } from './student-status';
 import { randomUUID } from 'crypto';
-import { easternDateKey, lastDayOfMonth } from '../billing/eastern-time';
+import {
+  dateKey,
+  easternDateKey,
+  lastDayOfMonth,
+} from '../billing/eastern-time';
 import { HORIZON_MONTHS_AHEAD } from '../sessions/session-builder';
 import {
   LEGACY_PENDING_FIELDS,
@@ -23,6 +27,38 @@ export const END_STATUSES: string[] = [
   STUDENT_STATUS.MIA,
   STUDENT_STATUS.DECLINED_SERVICES,
 ];
+
+/** The start week: the start date and the six days after it. */
+export const FIRST_WEEK_DAYS = 7;
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** A 'YYYY-MM-DD' key `days` later. */
+function addDays(key: string, days: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d + days);
+  return dateKey(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** Known keys only, no nested null/undefined (dynamoose rejects them). */
+function sanitizeFirstWeekSessions(raw: unknown[]): FirstWeekSession[] {
+  const clean: FirstWeekSession[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const entry = item as Record<string, unknown>;
+    const session: FirstWeekSession = {
+      date: entry.date as string,
+      start_time: entry.start_time as string,
+      end_time: entry.end_time as string,
+    };
+    if (typeof entry.tutor_id === 'string' && entry.tutor_id) {
+      session.tutor_id = entry.tutor_id;
+    }
+    clean.push(session);
+  }
+  return clean.sort((a, b) =>
+    `${a.date}${a.start_time}` < `${b.date}${b.start_time}` ? -1 : 1,
+  );
+}
 
 /** Max keys per dynamoose batchGet request. */
 const BATCH_GET_LIMIT = 100;
@@ -50,6 +86,10 @@ export class StudentsService {
       ? student.extra_planning_by_tutor.filter(
           (o) => o && typeof o === 'object',
         )
+      : undefined;
+
+    const firstWeek = Array.isArray(student.first_week_sessions)
+      ? sanitizeFirstWeekSessions(student.first_week_sessions)
       : undefined;
 
     const candidate: Record<string, unknown> = {
@@ -80,6 +120,8 @@ export class StudentsService {
           : undefined,
       mid_month_prior_charge: student.mid_month_prior_charge,
       mid_month_change_period: student.mid_month_change_period,
+      first_week_sessions:
+        firstWeek && firstWeek.length > 0 ? firstWeek : undefined,
       service_end_date: student.service_end_date,
       // The end status only means something alongside an end date.
       end_status: student.service_end_date ? student.end_status : undefined,
@@ -240,6 +282,48 @@ export class StudentsService {
       if (change.effective > latest) {
         throw new BadRequestException(
           `A scheduled change can be set no later than ${latest}.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Rejects malformed first-week sessions before anything is written: a
+   * real date inside the start week (the start date and the six days after
+   * it) and an end time after the start time.
+   */
+  private assertFirstWeekSessions(student: Student): void {
+    if (!Array.isArray(student.first_week_sessions)) return;
+    const start = (student.package_start_date ?? '').slice(0, 10);
+    const weekEnd = start ? addDays(start, FIRST_WEEK_DAYS - 1) : '';
+    for (const raw of student.first_week_sessions as unknown[]) {
+      const entry = (raw ?? {}) as Record<string, unknown>;
+      const date = entry.date;
+      if (
+        typeof date !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        isNaN(Date.parse(`${date}T00:00:00Z`))
+      ) {
+        throw new BadRequestException(
+          'A first-week session date must be formatted YYYY-MM-DD.',
+        );
+      }
+      const startTime = entry.start_time;
+      const endTime = entry.end_time;
+      if (
+        typeof startTime !== 'string' ||
+        typeof endTime !== 'string' ||
+        !TIME_PATTERN.test(startTime) ||
+        !TIME_PATTERN.test(endTime) ||
+        endTime <= startTime
+      ) {
+        throw new BadRequestException(
+          'A first-week session needs a start time and a later end time (HH:mm).',
+        );
+      }
+      if (start && (date < start || date > weekEnd)) {
+        throw new BadRequestException(
+          `A first-week session must fall between ${start} and ${weekEnd}.`,
         );
       }
     }
@@ -490,6 +574,7 @@ export class StudentsService {
   async createStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    this.assertFirstWeekSessions(student);
     await this.assertPendingChanges(student, now);
     const newUuid: string = randomUUID();
     const attributes = this.buildStudentAttributes(student);
@@ -522,6 +607,7 @@ export class StudentsService {
   async updateStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    this.assertFirstWeekSessions(student);
     await this.assertPendingChanges(student, now);
     const attributes = this.buildStudentAttributes(student);
     // An explicitly empty schedule/batch list means "clear it". dynamoose only
@@ -539,6 +625,12 @@ export class StudentsService {
     }
     remove.push(...this.pricingRemovals(student));
     remove.push(...this.serviceEndRemovals(student));
+    if (
+      Array.isArray(student.first_week_sessions) &&
+      student.first_week_sessions.length === 0
+    ) {
+      remove.push('first_week_sessions');
+    }
     const requested = this.pendingChangesRequested(student);
     if (requested !== undefined) {
       // Any pending write converges the record on the list: the legacy

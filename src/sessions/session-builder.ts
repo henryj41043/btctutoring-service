@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import { Session, SessionType } from '../models/session.model';
-import { ScheduleSlot, Student } from '../models/student.model';
+import {
+  FirstWeekSession,
+  ScheduleSlot,
+  Student,
+} from '../models/student.model';
 import {
   dateKey,
   dayBefore,
@@ -168,6 +172,8 @@ export interface ScheduleSegment {
   slots: ScheduleSlot[] | null;
   from: string; // 'YYYY-MM-DD'
   to: string; // 'YYYY-MM-DD'
+  /** One-off sessions of the stretch's start week (the current schedule only). */
+  firstWeek?: FirstWeekSession[];
 }
 
 /**
@@ -194,8 +200,10 @@ export function scheduleSegmentsForMonth(
     slots: ScheduleSlot[] | null;
     start?: string;
     end?: string;
+    firstWeek?: FirstWeekSession[];
   }[] = [];
   stretches.push({
+    firstWeek: student.first_week_sessions,
     slots: student.schedule ?? [],
     start: keyOf(student.package_start_date),
     end: changes[0] ? dayBefore(changes[0].effective.slice(0, 10)) : undefined,
@@ -216,7 +224,15 @@ export function scheduleSegmentsForMonth(
     let to = stretch.end && stretch.end < monthEnd ? stretch.end : monthEnd;
     if (serviceEnd && serviceEnd < to) to = serviceEnd;
     if (from > to) continue;
-    segments.push({ slots: stretch.slots, from, to });
+    const firstWeek = (stretch.firstWeek ?? []).filter(
+      (s) =>
+        !!s && typeof s.date === 'string' && s.date >= from && s.date <= to,
+    );
+    segments.push(
+      firstWeek.length > 0
+        ? { slots: stretch.slots, from, to, firstWeek }
+        : { slots: stretch.slots, from, to },
+    );
   }
   return segments;
 }
@@ -233,10 +249,49 @@ export function buildTutoringSegmentSessions(
   input: Omit<TutoringMonthInput, 'slots' | 'notBefore' | 'notAfter'>,
 ): Session[] {
   if (!segment.slots || segment.slots.length === 0) return [];
-  return buildTutoringMonthSessions({
+  const regular = buildTutoringMonthSessions({
     ...input,
     slots: segment.slots,
     notBefore: localDate(segment.from),
     notAfter: segment.to,
+  });
+  return [...regular, ...buildFirstWeekSessions(segment, input)];
+}
+
+/**
+ * The one-off sessions of a stretch's start week (a student starting
+ * mid-week who takes the missed session on another day): ordinary PENDING
+ * tutoring sessions that belong to no series, so a later "this and future"
+ * edit of the weekly schedule never touches them.
+ */
+export function buildFirstWeekSessions(
+  segment: ScheduleSegment,
+  input: Pick<TutoringMonthInput, 'student' | 'tutorNameById'>,
+): Session[] {
+  const { student, tutorNameById } = input;
+  return (segment.firstWeek ?? []).map((oneOff) => {
+    const [y, m, d] = oneOff.date.split('-').map(Number);
+    const tutorId = oneOff.tutor_id ?? student.assigned_tutor_id;
+    return {
+      type: SessionType.TUTORING,
+      start_datetime: easternSlotToUtc(
+        y,
+        m - 1,
+        d,
+        oneOff.start_time,
+      ).toISOString(),
+      end_datetime: easternSlotToUtc(
+        y,
+        m - 1,
+        d,
+        oneOff.end_time,
+      ).toISOString(),
+      status: PENDING_STATUS,
+      notes: '',
+      student_id: student.id,
+      student_name: student.name,
+      tutor_id: tutorId,
+      tutor_name: tutorNameById(tutorId) ?? '',
+    } as Session;
   });
 }
