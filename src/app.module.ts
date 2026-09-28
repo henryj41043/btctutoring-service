@@ -16,6 +16,7 @@ import { TeamsModule } from './teams/teams.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BillingModule } from './billing/billing.module';
 import { EmailsModule } from './emails/emails.module';
+import { DocumentsModule } from './documents/documents.module';
 import { ScholarshipsModule } from './scholarships/scholarships.module';
 import { PackagesModule } from './packages/packages.module';
 
@@ -35,6 +36,7 @@ import { PackagesModule } from './packages/packages.module';
     NotificationsModule,
     BillingModule,
     EmailsModule,
+    DocumentsModule,
     ScholarshipsModule,
     PackagesModule,
   ],
