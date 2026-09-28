@@ -1166,6 +1166,159 @@ describe('StudentsService', () => {
       });
     });
 
+    describe('first-week sessions', () => {
+      const lastUpdate = () => Model.update.mock.calls.at(-1)![1];
+      const oneOff = (over: Record<string, unknown> = {}) => ({
+        date: '2026-09-12',
+        start_time: '10:00',
+        end_time: '10:45',
+        ...over,
+      });
+      const save = (sessions: unknown[], start = '2026-09-11T00:00:00') => {
+        Model.update.mockResolvedValue({});
+        return service.updateStudent({
+          id: 's-1',
+          package_start_date: start,
+          first_week_sessions: sessions,
+        } as unknown as Student);
+      };
+
+      it('persists sanitized sessions, sorted by date and time', async () => {
+        await save(
+          [
+            oneOff({ date: '2026-09-13', tutor_id: 't-2', extra: 'nope' }),
+            oneOff({ start_time: '14:00', end_time: '14:45', tutor_id: '' }),
+            oneOff(),
+            null,
+            'junk',
+          ].filter((x) => x !== null && x !== 'junk'),
+        );
+        expect(lastUpdate()).toEqual({
+          package_start_date: '2026-09-11T00:00:00',
+          first_week_sessions: [
+            { date: '2026-09-12', start_time: '10:00', end_time: '10:45' },
+            { date: '2026-09-12', start_time: '14:00', end_time: '14:45' },
+            {
+              date: '2026-09-13',
+              start_time: '10:00',
+              end_time: '10:45',
+              tutor_id: 't-2',
+            },
+          ],
+        });
+      });
+
+      it('an empty list clears them', async () => {
+        await save([]);
+        expect(lastUpdate()).toEqual({
+          $SET: { package_start_date: '2026-09-11T00:00:00' },
+          $REMOVE: ['first_week_sessions'],
+        });
+      });
+
+      it('an absent list leaves them alone', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({ id: 's-1' } as unknown as Student);
+        expect(lastUpdate()).toEqual({});
+      });
+
+      it('accepts the start date itself and the sixth day after it', async () => {
+        await save([
+          oneOff({ date: '2026-09-11' }),
+          oneOff({ date: '2026-09-17' }),
+        ]);
+        expect(lastUpdate().first_week_sessions).toHaveLength(2);
+      });
+
+      it('the start week crosses a month boundary', async () => {
+        await save([oneOff({ date: '2026-10-04' })], '2026-09-28T00:00:00');
+        expect(lastUpdate().first_week_sessions).toHaveLength(1);
+        await expect(
+          save([oneOff({ date: '2026-10-05' })], '2026-09-28T00:00:00'),
+        ).rejects.toThrow(
+          'A first-week session must fall between 2026-09-28 and 2026-10-04.',
+        );
+      });
+
+      it.each([['2026-09-10'], ['2026-09-18'], ['2026-10-12']])(
+        'rejects %s: outside the start week',
+        async (date) => {
+          await expect(save([oneOff({ date })])).rejects.toThrow(
+            'A first-week session must fall between 2026-09-11 and 2026-09-17.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('skips the window check without a start date', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          first_week_sessions: [oneOff({ date: '2030-01-01' })],
+        } as unknown as Student);
+        expect(lastUpdate().first_week_sessions).toHaveLength(1);
+      });
+
+      it.each([
+        ['2026-09-12T00:00:00'],
+        ['9/12/2026'],
+        ['2026-13-40'],
+        [''],
+        [undefined],
+        [20260912],
+      ])('rejects the date %p', async (date) => {
+        await expect(save([oneOff({ date })])).rejects.toThrow(
+          'A first-week session date must be formatted YYYY-MM-DD.',
+        );
+      });
+
+      it('rejects a junk entry', async () => {
+        await expect(save([null])).rejects.toThrow(
+          'A first-week session date must be formatted YYYY-MM-DD.',
+        );
+      });
+
+      it.each([
+        ['10:00', '10:00'],
+        ['10:00', '09:45'],
+        ['24:00', '24:45'],
+        ['10:60', '11:00'],
+        ['9:00', '10:00'],
+        ['10:00', undefined],
+        [undefined, '10:45'],
+        [600, 645],
+      ])('rejects the times %p to %p', async (start_time, end_time) => {
+        await expect(save([oneOff({ start_time, end_time })])).rejects.toThrow(
+          'A first-week session needs a start time and a later end time (HH:mm).',
+        );
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+
+      it('accepts the edges of the day', async () => {
+        await save([oneOff({ start_time: '00:00', end_time: '23:59' })]);
+        expect(lastUpdate().first_week_sessions).toHaveLength(1);
+      });
+
+      it('createStudent validates and stores them too', async () => {
+        Model.__save.mockResolvedValue({});
+        await service.createStudent({
+          name: 'Pat',
+          package_start_date: '2026-09-11T00:00:00',
+          first_week_sessions: [oneOff()],
+        } as unknown as Student);
+        expect(Model.mock.calls.at(-1)![0].first_week_sessions).toEqual([
+          oneOff(),
+        ]);
+        await expect(
+          service.createStudent({
+            name: 'Pat',
+            package_start_date: '2026-09-11T00:00:00',
+            first_week_sessions: [oneOff({ date: '2026-09-30' })],
+          } as unknown as Student),
+        ).rejects.toThrow('A first-week session must fall between');
+      });
+    });
+
     it('persists the scholarship flag', async () => {
       Model.update.mockResolvedValue(sampleStudent());
       await service.updateStudent(sampleStudent({ scholarship: true }));
