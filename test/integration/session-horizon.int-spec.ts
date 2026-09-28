@@ -134,6 +134,37 @@ describe('Session horizon fill (integration)', () => {
     expect(created.every((s) => s.start_datetime.startsWith(key))).toBe(true);
   });
 
+  it('admin rebuilds one student from a date', async () => {
+    Students.get.mockResolvedValue(activeStudent);
+    scanResolves(Contacts, [{ id: 't-1', first_name: 'Tess' }]);
+    scanResolves(Sessions, []);
+    const d = new Date();
+    const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const res = await request(server())
+      .post(`/sessions/horizon/fill?student=s-1&from=${from}`)
+      .set('x-test-role', 'admin');
+
+    expect(res.status).toBe(201);
+    expect(res.body.sessionsCreated).toBeGreaterThan(0);
+    const created = Sessions.batchPut.mock.calls.flatMap(
+      (c) => c[0] as { start_datetime: string }[],
+    );
+    expect(created.every((s) => s.start_datetime > d.toISOString())).toBe(true);
+  });
+
+  it('rejects a rebuild without a student or with a bad date', async () => {
+    const noStudent = await request(server())
+      .post('/sessions/horizon/fill?from=2026-10-14')
+      .set('x-test-role', 'admin');
+    expect(noStudent.status).toBe(400);
+    const badDate = await request(server())
+      .post('/sessions/horizon/fill?student=s-1&from=soon')
+      .set('x-test-role', 'admin');
+    expect(badDate.status).toBe(400);
+    expect(Sessions.batchPut).not.toHaveBeenCalled();
+  });
+
   it('tutor is forbidden', async () => {
     const res = await request(server())
       .post('/sessions/horizon/fill')

@@ -651,4 +651,158 @@ describe('SessionHorizonService', () => {
       expect(again.sessionsCreated).toBe(0);
     });
   });
+
+  describe('rebuild from a date', () => {
+    const friday = [
+      { weekday: 'FRIDAY', start_time: '09:00', end_time: '09:30' },
+    ];
+    const days = (): string[] =>
+      allCreated()
+        .map((s) => s.start_datetime.slice(0, 10))
+        .sort();
+    const rebuild = (from: string) =>
+      service.fillHorizon(now, { studentId: 's-1', rebuildFrom: from });
+
+    it('rebuilds the rest of the running schedule this month and the months ahead', async () => {
+      const res = await rebuild('2026-09-21');
+      // Sept from the 21st: Mon 21, 28 + Wed 23, 30.
+      expect(days().filter((d) => d.startsWith('2026-09'))).toEqual([
+        '2026-09-21',
+        '2026-09-23',
+        '2026-09-28',
+        '2026-09-30',
+      ]);
+      expect(res.sessionsCreated).toBe(4 + 26);
+      expect(res.studentsFilled).toBe(1);
+      expect(sessions.getSessionsByStudent).toHaveBeenCalledWith(
+        's-1',
+        expect.anything(),
+      );
+    });
+
+    it('never reaches into the past: an earlier date starts today, after now', async () => {
+      // now = Mon Sept 14 07:00 local; the 10:00 Eastern session is 14:00Z.
+      await rebuild('2026-09-01');
+      const september = days().filter((d) => d.startsWith('2026-09'));
+      expect(september[0]).toBe('2026-09-14');
+      expect(september).toHaveLength(6);
+    });
+
+    it('drops a session that already started today', async () => {
+      const late = new Date(2026, 8, 14, 23, 0, 0);
+      await service.fillHorizon(late, {
+        studentId: 's-1',
+        rebuildFrom: '2026-09-14',
+      });
+      const created = allCreated().map((s) => s.start_datetime);
+      expect(created.every((iso) => iso > late.toISOString())).toBe(true);
+    });
+
+    it('skips only the sessions that already exist at the same start time', async () => {
+      students.getStudent.mockResolvedValue([student()]);
+      sessions.getSessionsByStudent.mockResolvedValue([
+        // A pre-cancelled vacation session must not block the rest.
+        tutoring({
+          status: 'Cancelled',
+          start_datetime: '2026-09-21T14:00:00.000Z',
+        }),
+      ]);
+      await rebuild('2026-09-21');
+      expect(days().filter((d) => d.startsWith('2026-09'))).toEqual([
+        '2026-09-23',
+        '2026-09-28',
+        '2026-09-30',
+      ]);
+    });
+
+    it('is idempotent: a second rebuild creates nothing', async () => {
+      await rebuild('2026-09-21');
+      const first = allCreated().map((s, i) => ({ ...s, id: `x-${i}` }));
+      sessions.createSessions.mockClear();
+      sessions.getSessionsByStudent.mockResolvedValue(first);
+      const again = await rebuild('2026-09-21');
+      expect(again.sessionsCreated).toBe(0);
+      expect(sessions.createSessions).not.toHaveBeenCalled();
+    });
+
+    it('follows the schedule that now applies to each stretch', async () => {
+      students.getStudent.mockResolvedValue([
+        student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-10-14', schedule: friday },
+          ],
+        }),
+      ]);
+      await rebuild('2026-10-01');
+      expect(days().some((d) => d.startsWith('2026-09'))).toBe(false);
+      expect(days().filter((d) => d.startsWith('2026-10'))).toEqual([
+        '2026-10-05',
+        '2026-10-07',
+        '2026-10-12',
+        '2026-10-16',
+        '2026-10-23',
+        '2026-10-30',
+      ]);
+    });
+
+    it('starts inside a stretch when the date falls in the middle of it', async () => {
+      await rebuild('2026-10-20');
+      // Mon 26 + Wed 21, 28.
+      expect(days().filter((d) => d.startsWith('2026-10'))).toEqual([
+        '2026-10-21',
+        '2026-10-26',
+        '2026-10-28',
+      ]);
+    });
+
+    it('a change without a schedule leaves its stretch empty and is counted', async () => {
+      students.getStudent.mockResolvedValue([
+        student({
+          pending_changes: [{ package: 'Excel', effective: '2026-10-14' }],
+        }),
+      ]);
+      const res = await rebuild('2026-10-01');
+      expect(days()).toEqual(['2026-10-05', '2026-10-07', '2026-10-12']);
+      expect(res.monthsSkippedNoSchedule).toBe(3);
+    });
+
+    it('without auto-renew only this month is rebuilt', async () => {
+      students.getStudent.mockResolvedValue([student({ auto_renew: false })]);
+      const res = await rebuild('2026-09-21');
+      expect(res.sessionsCreated).toBe(4);
+      expect(days().every((d) => d.startsWith('2026-09'))).toBe(true);
+    });
+
+    it('still needs an Active student with a schedule', async () => {
+      students.getStudent.mockResolvedValue([
+        student({ status: 'Past Student' }),
+      ]);
+      expect((await rebuild('2026-09-21')).sessionsCreated).toBe(0);
+      students.getStudent.mockResolvedValue([student({ schedule: [] })]);
+      expect((await rebuild('2026-09-21')).sessionsCreated).toBe(0);
+    });
+
+    it('stops at the service end date', async () => {
+      students.getStudent.mockResolvedValue([
+        student({ service_end_date: '2026-09-24' }),
+      ]);
+      await rebuild('2026-09-21');
+      expect(days()).toEqual(['2026-09-21', '2026-09-23']);
+    });
+
+    it('is ignored without a student: the whole-fleet fill keeps its cautious rule', async () => {
+      const res = await service.fillHorizon(now, { rebuildFrom: '2026-09-21' });
+      expect(days().some((d) => d.startsWith('2026-09'))).toBe(false);
+      expect(res.sessionsCreated).toBe(26);
+    });
+
+    it('keeps a reused series going and never adopts a one-off as a series', async () => {
+      students.getStudent.mockResolvedValue([student()]);
+      sessions.getSessionsByStudent.mockResolvedValue([
+        tutoring({ series_id: 'ser-keep' }),
+      ]);
+      await rebuild('2026-09-21');
+      expect(allCreated().every((s) => s.series_id === 'ser-keep')).toBe(true);
+    });
+  });
 });

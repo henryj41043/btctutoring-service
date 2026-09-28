@@ -25,6 +25,14 @@ export interface HorizonFillOptions {
   lock?: boolean;
   /** Fill one student only (after a schedule save); skips the group roll. */
   studentId?: string;
+  /**
+   * Rebuild mode ('YYYY-MM-DD', one student, admin-triggered): every stretch
+   * is rebuilt from this date — the remainder of the running schedule in the
+   * current month included — skipping only sessions that already exist at
+   * the same start time. Used after the app removed the pending sessions of
+   * a scheduled change that was removed or re-dated.
+   */
+  rebuildFrom?: string;
 }
 
 export interface HorizonFillResult {
@@ -137,9 +145,10 @@ export class SessionHorizonService {
       return idx;
     };
 
-    // Buckets: tutoring days (Eastern dates) per student, latest series per
-    // (student, tutor), and group sessions per series.
+    // Buckets: tutoring days (Eastern dates) and start instants per student,
+    // latest series per (student, tutor), and group sessions per series.
     const tutoringDays = new Map<string, Set<string>>();
+    const tutoringStarts = new Map<string, Set<string>>();
     const seriesByStudent = new Map<string, Map<string, SeriesRef>>();
     const groupBySeries = new Map<string, Session[]>();
     for (const s of windowSessions) {
@@ -149,6 +158,9 @@ export class SessionHorizonService {
         let days = tutoringDays.get(s.student_id);
         if (!days) tutoringDays.set(s.student_id, (days = new Set()));
         days.add(easternDateKey(new Date(s.start_datetime)));
+        let starts = tutoringStarts.get(s.student_id);
+        if (!starts) tutoringStarts.set(s.student_id, (starts = new Set()));
+        starts.add(s.start_datetime);
         if (s.series_id && s.tutor_id) {
           let byTutor = seriesByStudent.get(s.student_id);
           if (!byTutor)
@@ -172,8 +184,17 @@ export class SessionHorizonService {
     }
 
     const todayKey = dateKey(year, month, now.getDate());
+    // Rebuild mode never reaches into the past.
+    const rebuildFrom =
+      opts.studentId && opts.rebuildFrom
+        ? opts.rebuildFrom > todayKey
+          ? opts.rebuildFrom
+          : todayKey
+        : undefined;
+    const nowIso = now.toISOString();
     for (const student of students) {
-      if (!this.isEligible(student)) continue;
+      if (!this.isEligible(student, !!rebuildFrom)) continue;
+      const starts = tutoringStarts.get(student.id!) ?? new Set<string>();
       const days = tutoringDays.get(student.id!) ?? new Set<string>();
       const seriesIdByTutor = new Map<string, string>(
         [
@@ -190,6 +211,40 @@ export class SessionHorizonService {
             target.month,
           );
           for (const segment of segments) {
+            if (rebuildFrom) {
+              // Beyond this month a rebuild still needs auto-renew.
+              if (i > 0 && !student.auto_renew) continue;
+              if (segment.to < rebuildFrom) continue;
+              if (segment.slots === null) {
+                result.monthsSkippedNoSchedule++;
+                continue;
+              }
+              const rebuilt = buildTutoringSegmentSessions(
+                {
+                  ...segment,
+                  from: segment.from > rebuildFrom ? segment.from : rebuildFrom,
+                },
+                {
+                  student,
+                  tutorNameById,
+                  year: target.year,
+                  month: target.month,
+                  seriesIdByTutor,
+                },
+              ).filter(
+                (s) =>
+                  s.start_datetime > nowIso && !starts.has(s.start_datetime),
+              );
+              if (rebuilt.length === 0) continue;
+              await this.sessions.createSessions(rebuilt);
+              created += rebuilt.length;
+              for (const s of rebuilt) {
+                starts.add(s.start_datetime);
+                days.add(easternDateKey(new Date(s.start_datetime)));
+                if (s.series_id) seriesIdByTutor.set(s.tutor_id, s.series_id);
+              }
+              continue;
+            }
             // The current month belongs to the app's rest-of-month
             // generation: only a stretch that STARTS today or later (a
             // change landing this month) is filled here, so a session an
@@ -214,7 +269,8 @@ export class SessionHorizonService {
             created += built.length;
             for (const s of built) {
               days.add(easternDateKey(new Date(s.start_datetime)));
-              seriesIdByTutor.set(s.tutor_id, s.series_id!);
+              // A first-week one-off belongs to no series.
+              if (s.series_id) seriesIdByTutor.set(s.tutor_id, s.series_id);
             }
           }
         }
@@ -259,10 +315,11 @@ export class SessionHorizonService {
     return false;
   }
 
-  private isEligible(student: Student): boolean {
+  /** A rebuild also serves a student without auto-renew (this month only). */
+  private isEligible(student: Student, rebuild: boolean = false): boolean {
     return (
       student.status === STUDENT_STATUS.ACTIVE_STUDENT &&
-      !!student.auto_renew &&
+      (rebuild || !!student.auto_renew) &&
       !!student.schedule?.length &&
       !!student.package_start_date
     );
