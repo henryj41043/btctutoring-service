@@ -26,7 +26,7 @@ jobs:
         run: npm run test:e2e
 
   mutation:
-    name: Mutation testing (changed files only)
+    name: Mutation testing (changed lines only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -38,16 +38,25 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Stryker on changed source files vs ${{ github.base_ref }}
+      # Incremental mutation state: a re-push only re-tests what changed.
+      - name: Restore incremental mutation state
+        uses: actions/cache@v4
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-incremental-${{ github.head_ref }}-${{ github.run_id }}
+          restore-keys: |
+            stryker-incremental-${{ github.head_ref }}-
+            stryker-incremental-
+      # Only the LINES this PR added or changed are mutated (file:start-end
+      # ranges). Mutating whole files made a small edit to a large service
+      # cost up to an hour; the untouched lines were tested when written.
+      - name: Stryker on changed lines vs ${{ github.base_ref }}
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
-          BASE="origin/${{ github.base_ref }}"
-          CHANGED=$(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- src \
-            | grep -E '\.ts$' \
-            | grep -vE '\.spec\.ts$|/models/|/schemas/|/dto/|\.module\.ts$|/main\.ts$' || true)
-          if [ -z "$CHANGED" ]; then
-            echo "No mutable source files changed in this PR; skipping mutation testing."
+          RANGES=$(scripts/mutation-ranges.sh "origin/${{ github.base_ref }}" HEAD)
+          if [ -z "$RANGES" ]; then
+            echo "No mutable source lines changed in this PR; skipping mutation testing."
             exit 0
           fi
-          echo "Mutating changed files:"; echo "$CHANGED"
-          npx stryker run --mutate "$(echo "$CHANGED" | paste -sd, -)"
+          echo "Mutating changed lines:"; echo "$RANGES" | tr "," "\n"
+          npx stryker run --incremental --incrementalFile reports/stryker-incremental.json --mutate "$RANGES"
