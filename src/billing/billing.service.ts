@@ -12,11 +12,21 @@ export class BillingService {
     return `${contactId}#${periodStart}`;
   }
 
+  /** Frozen statements and job locks share the table but are not records. */
+  private static isRecord(item: unknown): boolean {
+    const row = item as { id?: string; contact_id?: string };
+    return (
+      !`${row?.id ?? ''}`.startsWith('stmt#') && row?.contact_id !== 'lock'
+    );
+  }
+
   async getBillingRecords() {
     return BillingModel.scan()
       .all()
       .exec()
-      .then((records) => records)
+      .then((records) =>
+        (records as unknown[]).filter((r) => BillingService.isRecord(r)),
+      )
       .catch((error: Error) => {
         Logger.error(error.message, error);
         return Promise.reject(error);
@@ -27,7 +37,9 @@ export class BillingService {
     return BillingModel.scan({ contact_id: { eq: contactId } })
       .all()
       .exec()
-      .then((records) => records)
+      .then((records) =>
+        (records as unknown[]).filter((r) => BillingService.isRecord(r)),
+      )
       .catch((error: Error) => {
         Logger.error(error.message, error);
         return Promise.reject(error);
@@ -54,6 +66,56 @@ export class BillingService {
       .exec()
       .then((records) => records)
       .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /** Deterministic id of a family's frozen statement for a month ('YYYY-MM'). */
+  static statementId(contactId: string, month: string): string {
+    return `stmt#${contactId}#${month}`;
+  }
+
+  /** The stored (frozen) statements of a month, as the JSON they were written with. */
+  async getFrozenStatements(month: string): Promise<string[]> {
+    return BillingModel.scan({ statement_month: { eq: month } })
+      .all()
+      .exec()
+      .then((items) =>
+        (items as unknown as { statement?: string }[])
+          .map((i) => i.statement)
+          .filter((s): s is string => typeof s === 'string' && s.length > 0),
+      )
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
+  /**
+   * Stores a frozen statement only if the family has none for that month
+   * (conditional create): a closed month is written once and never rewritten.
+   * Returns whether a new statement was written.
+   */
+  async createFrozenStatementIfAbsent(item: {
+    contact_id: string;
+    month: string;
+    frozen_at: string;
+    legacy?: boolean;
+    statement: string;
+  }): Promise<boolean> {
+    const attributes: Record<string, unknown> = {
+      id: BillingService.statementId(item.contact_id, item.month),
+      contact_id: item.contact_id,
+      statement_month: item.month,
+      frozen_at: item.frozen_at,
+      statement: item.statement,
+    };
+    if (item.legacy) attributes.legacy = true;
+    return BillingModel.create(attributes)
+      .then(() => true)
+      .catch((error: Error) => {
+        if (BillingService.isAlreadyExists(error)) return false;
         Logger.error(error.message, error);
         return Promise.reject(error);
       });

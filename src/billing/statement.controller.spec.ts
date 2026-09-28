@@ -25,6 +25,7 @@ describe('StatementController', () => {
   const statements = {
     getStatements: jest.fn(),
     previewStatement: jest.fn(),
+    freezeMonth: jest.fn(),
   };
   const preview = {
     month: '2026-09',
@@ -76,5 +77,19 @@ describe('StatementController', () => {
     ).rejects.toThrow('Unauthorized');
     expect(statements.getStatements).not.toHaveBeenCalled();
     expect(statements.previewStatement).not.toHaveBeenCalled();
+  });
+
+  it('admin freezes a closed month', async () => {
+    statements.freezeMonth.mockResolvedValue({ month: '2026-08', frozen: 3 });
+    const res = await controller.freeze(reqAs(admin), '2026-08');
+    expect(statements.freezeMonth).toHaveBeenCalledWith('2026-08');
+    expect(res).toEqual({ month: '2026-08', frozen: 3 });
+  });
+
+  it('a non-admin cannot freeze', async () => {
+    await expect(controller.freeze(reqAs(tutor), '2026-08')).rejects.toThrow(
+      'Unauthorized',
+    );
+    expect(statements.freezeMonth).not.toHaveBeenCalled();
   });
 });

@@ -311,4 +311,125 @@ describe('BillingService', () => {
       await expect(service.releaseLock('lock#x')).resolves.toBeUndefined();
     });
   });
+
+  describe('frozen statements', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it('builds a deterministic statement id', () => {
+      expect(BillingService.statementId('contact-1', '2026-08')).toBe(
+        'stmt#contact-1#2026-08',
+      );
+    });
+
+    it('reads a month of stored statements, skipping empty ones', async () => {
+      const chain = scanResolves(Model, [
+        { id: 'stmt#c-1#2026-08', statement: '{"a":1}' },
+        { id: 'stmt#c-2#2026-08', statement: '' },
+        { id: 'stmt#c-3#2026-08' },
+        { id: 'stmt#c-4#2026-08', statement: 5 },
+        { id: 'stmt#c-5#2026-08', statement: '{"b":2}' },
+      ]);
+      expect(await service.getFrozenStatements('2026-08')).toEqual([
+        '{"a":1}',
+        '{"b":2}',
+      ]);
+      expect(Model.scan).toHaveBeenCalledWith({
+        statement_month: { eq: '2026-08' },
+      });
+      expect(chain.all).toHaveBeenCalled();
+    });
+
+    it('rejects when the read fails', async () => {
+      scanRejects(Model, new Error('boom'));
+      await expect(service.getFrozenStatements('2026-08')).rejects.toThrow(
+        'boom',
+      );
+    });
+
+    it('writes a statement once, without a period_start', async () => {
+      Model.create.mockResolvedValue({});
+      const created = await service.createFrozenStatementIfAbsent({
+        contact_id: 'c-1',
+        month: '2026-08',
+        frozen_at: '2026-09-01T06:00:00.000Z',
+        statement: '{"a":1}',
+      });
+      expect(created).toBe(true);
+      expect(Model.create).toHaveBeenCalledWith({
+        id: 'stmt#c-1#2026-08',
+        contact_id: 'c-1',
+        statement_month: '2026-08',
+        frozen_at: '2026-09-01T06:00:00.000Z',
+        statement: '{"a":1}',
+      });
+    });
+
+    it('marks a legacy statement', async () => {
+      Model.create.mockResolvedValue({});
+      await service.createFrozenStatementIfAbsent({
+        contact_id: 'c-1',
+        month: '2026-07',
+        frozen_at: 'x',
+        legacy: true,
+        statement: '{}',
+      });
+      expect(Model.create.mock.calls[0][0].legacy).toBe(true);
+      await service.createFrozenStatementIfAbsent({
+        contact_id: 'c-1',
+        month: '2026-07',
+        frozen_at: 'x',
+        legacy: false,
+        statement: '{}',
+      });
+      expect('legacy' in Model.create.mock.calls[1][0]).toBe(false);
+    });
+
+    it('never rewrites a month that is already frozen', async () => {
+      Model.create.mockRejectedValue({
+        name: 'ConditionalCheckFailedException',
+      });
+      expect(
+        await service.createFrozenStatementIfAbsent({
+          contact_id: 'c-1',
+          month: '2026-08',
+          frozen_at: 'x',
+          statement: '{}',
+        }),
+      ).toBe(false);
+    });
+
+    it('rejects on an unexpected write error', async () => {
+      Model.create.mockRejectedValue(new Error('boom'));
+      await expect(
+        service.createFrozenStatementIfAbsent({
+          contact_id: 'c-1',
+          month: '2026-08',
+          frozen_at: 'x',
+          statement: '{}',
+        }),
+      ).rejects.toThrow('boom');
+    });
+
+    it('record reads never return statements or job locks', async () => {
+      const rows = [
+        sampleRecord({ id: 'contact-1#2026-07-01' }),
+        { id: 'stmt#contact-1#2026-07', contact_id: 'contact-1' },
+        { id: 'lock#auto-renew#2026-07', contact_id: 'lock' },
+        { contact_id: 'contact-1', period_start: '2026-07-15' },
+        null,
+      ];
+      scanResolves(Model, rows);
+      expect(await service.getBillingRecords()).toEqual([
+        rows[0],
+        rows[3],
+        null,
+      ]);
+      scanResolves(Model, rows);
+      expect(await service.getBillingRecordsByContact('contact-1')).toEqual([
+        rows[0],
+        rows[3],
+        null,
+      ]);
+    });
+  });
 });

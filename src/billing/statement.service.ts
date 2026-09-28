@@ -13,11 +13,19 @@ import { Contact } from '../models/contact.model';
 import { BillingRecord } from '../models/billing-record.model';
 import { PackageCatalog } from './package-config';
 import {
+  applyRecords,
   buildStatement,
   buildStatements,
   parseMonth,
   Statement,
 } from './statement-engine';
+import { easternDateKey } from './eastern-time';
+
+export interface FreezeResult {
+  month: string;
+  /** Statements written by this run (families already frozen are skipped). */
+  frozen: number;
+}
 
 /** POST /billing/statements/preview payload. */
 export class StatementPreviewRequest {
@@ -64,9 +72,28 @@ export class StatementService {
     return catalog;
   }
 
-  /** Every family's statement for a month ('YYYY-MM'). */
-  async getStatements(month: string): Promise<Statement[]> {
+  /**
+   * Every family's statement for a month ('YYYY-MM'). A month that has
+   * closed and was frozen is served from its stored copy — what the family
+   * was billed, whatever the students look like today — with the paid state
+   * and overrides laid over it. Anything else is calculated now.
+   */
+  async getStatements(
+    month: string,
+    now: Date = new Date(),
+  ): Promise<Statement[]> {
     const parsed = this.monthOf(month);
+    if (month < easternDateKey(now).slice(0, 7)) {
+      const stored = await this.storedStatements(month);
+      if (stored.length > 0) {
+        const records = (await this.billing.getBillingRecordsByMonth(
+          month,
+        )) as unknown as BillingRecord[];
+        return stored
+          .map((statement) => applyRecords(statement, records))
+          .sort((a, b) => a.contact_name.localeCompare(b.contact_name));
+      }
+    }
     const catalog = await this.catalog();
     const [students, contacts, records] = await Promise.all([
       this.students.getStudents(),
@@ -81,6 +108,78 @@ export class StatementService {
       parsed.month,
       catalog,
     );
+  }
+
+  /** The frozen statements of a month; an unreadable one is skipped and logged. */
+  private async storedStatements(month: string): Promise<Statement[]> {
+    const statements: Statement[] = [];
+    for (const json of await this.billing.getFrozenStatements(month)) {
+      try {
+        const statement = JSON.parse(json) as Statement;
+        if (
+          statement &&
+          statement.contact_id &&
+          Array.isArray(statement.dues)
+        ) {
+          statements.push(statement);
+        }
+      } catch {
+        this.logger.error(`Unreadable frozen statement for ${month}.`);
+      }
+    }
+    return statements;
+  }
+
+  /**
+   * Freezes a CLOSED month: every family's statement is calculated one last
+   * time and stored. Families already frozen for the month are left alone,
+   * so re-running is safe. The inputs may be passed in by a caller that has
+   * already loaded them (the 1st-of-month run).
+   */
+  async freezeMonth(
+    month: string,
+    now: Date = new Date(),
+    loaded?: {
+      students: Student[];
+      contacts: Contact[];
+      catalog: PackageCatalog;
+    },
+  ): Promise<FreezeResult> {
+    const parsed = this.monthOf(month);
+    if (month >= easternDateKey(now).slice(0, 7)) {
+      throw new BadRequestException(
+        'Only a month that has ended can be frozen.',
+      );
+    }
+    const catalog = loaded?.catalog ?? (await this.catalog());
+    const [students, contacts, records] = await Promise.all([
+      loaded?.students ?? this.students.getStudents(),
+      loaded?.contacts ?? this.contacts.getContacts(),
+      this.billing.getBillingRecordsByMonth(month),
+    ]);
+    const statements = buildStatements(
+      contacts as unknown as Contact[],
+      students as unknown as Student[],
+      records as unknown as BillingRecord[],
+      parsed.year,
+      parsed.month,
+      catalog,
+    );
+    const frozenAt = now.toISOString();
+    let frozen = 0;
+    for (const statement of statements) {
+      const created = await this.billing.createFrozenStatementIfAbsent({
+        contact_id: statement.contact_id,
+        month,
+        frozen_at: frozenAt,
+        statement: JSON.stringify({ ...statement, frozen_at: frozenAt }),
+      });
+      if (created) frozen++;
+    }
+    this.logger.log(
+      `Froze ${month}: ${frozen} statement(s) written, ${statements.length - frozen} already frozen.`,
+    );
+    return { month, frozen };
   }
 
   /**

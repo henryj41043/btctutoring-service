@@ -5,6 +5,7 @@ import { SessionsService } from '../sessions/sessions.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { BillingService } from './billing.service';
 import { PackagesService } from '../packages/packages.service';
+import { StatementService } from './statement.service';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { Session, SessionType } from '../models/session.model';
@@ -40,6 +41,7 @@ export class AutoRenewService {
     private readonly contacts: ContactsService,
     private readonly billing: BillingService,
     private readonly packages: PackagesService,
+    private readonly statements: StatementService,
   ) {}
 
   // 06:00 (container time, UTC on Fargate) on the 1st of every month.
@@ -85,6 +87,20 @@ export class AutoRenewService {
     ]);
     const students = studentsRes as unknown as Student[];
     const contacts = contactsRes as unknown as Contact[];
+
+    // The month that just ended is frozen FIRST, from the students as they
+    // stand before any promotion below touches them. A failure is logged and
+    // never blocks the new month (the freeze can be re-run by an admin).
+    const closed = new Date(year, month - 1, 1);
+    await this.statements
+      .freezeMonth(
+        this.monthKey(closed.getFullYear(), closed.getMonth()),
+        now,
+        { students, contacts, catalog },
+      )
+      .catch((err: Error) => {
+        this.logger.error(`Freezing the closed month failed: ${err.message}`);
+      });
 
     const monthStartDay = `${this.monthKey(year, month)}-01`;
     // A student whose last day of service fell before this month is done,

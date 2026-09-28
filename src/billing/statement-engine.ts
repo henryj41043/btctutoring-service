@@ -123,6 +123,10 @@ export interface Statement {
   /** Every flag present on the statement's lines. */
   flags: LineFlag[];
   needs_attention: boolean;
+  /** Set once the month has closed: the statement no longer recalculates. */
+  frozen_at?: string;
+  /** A month from before Billing v2: totals from the billing records, no lines. */
+  legacy?: boolean;
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -511,27 +515,14 @@ export function buildStatement(
     derived.push({ day: 1, amount: total });
   }
 
-  const dues: StatementDue[] = derived.map(({ day, amount }) => {
-    const period = dateKey(year, month, day);
-    const record = records.find(
-      (r) => r.contact_id === contact.id && r.period_start === period,
-    );
-    const override =
-      typeof record?.amount_override === 'number'
-        ? record.amount_override
-        : null;
-    const due: StatementDue = {
-      day,
-      period_start: period,
-      derived: amount,
-      override,
-      amount: override ?? amount,
-      paid: record?.paid ?? false,
-    };
-    if (record?.paid_date) due.paid_date = record.paid_date;
-    if (record?.invoice_number) due.invoice_number = record.invoice_number;
-    return due;
-  });
+  const dues: StatementDue[] = derived.map(({ day, amount }) => ({
+    day,
+    period_start: dateKey(year, month, day),
+    derived: amount,
+    override: null,
+    amount,
+    paid: false,
+  }));
 
   const flags: LineFlag[] = [];
   for (const line of lines) {
@@ -540,25 +531,130 @@ export function buildStatement(
     }
   }
 
+  return applyRecords(
+    {
+      contact_id: contact.id!,
+      contact_name:
+        `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim(),
+      month: `${year}-${pad(month + 1)}`,
+      cycle: semi ? 'semi_monthly' : 'monthly',
+      lines,
+      package_gross: gross,
+      package_subtotal: subtotal,
+      sibling_discount_percent:
+        siblingAmount > 0 ? contact.sibling_discount! : 0,
+      sibling_discount_amount: siblingAmount,
+      group_fee: groupFee,
+      group_students: groupStudents.map((s) => s.name ?? ''),
+      total,
+      dues,
+      total_due: round2(dues.reduce((sum, d) => sum + d.amount, 0)),
+      flags,
+      needs_attention: packaged.some((s) => studentNeedsAttention(s, catalog)),
+    },
+    records,
+  );
+}
+
+/**
+ * Lays the per-date billing records over a statement's dues: the paid state,
+ * paid date, invoice number and the admin's override. The calculated amounts
+ * are never touched, so this is safe on a FROZEN statement too — a month
+ * that closed can still be marked paid or corrected with an override.
+ */
+export function applyRecords(
+  statement: Statement,
+  records: BillingRecord[],
+): Statement {
+  const dues: StatementDue[] = statement.dues.map((due) => {
+    const record = records.find(
+      (r) =>
+        r.contact_id === statement.contact_id &&
+        r.period_start === due.period_start,
+    );
+    const override =
+      typeof record?.amount_override === 'number'
+        ? record.amount_override
+        : null;
+    const merged: StatementDue = {
+      day: due.day,
+      period_start: due.period_start,
+      derived: due.derived,
+      override,
+      amount: override ?? due.derived,
+      paid: record?.paid ?? false,
+    };
+    if (record?.paid_date) merged.paid_date = record.paid_date;
+    if (record?.invoice_number) merged.invoice_number = record.invoice_number;
+    return merged;
+  });
   return {
-    contact_id: contact.id!,
-    contact_name:
-      `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim(),
-    month: `${year}-${pad(month + 1)}`,
-    cycle: semi ? 'semi_monthly' : 'monthly',
-    lines,
-    package_gross: gross,
-    package_subtotal: subtotal,
-    sibling_discount_percent: siblingAmount > 0 ? contact.sibling_discount! : 0,
-    sibling_discount_amount: siblingAmount,
-    group_fee: groupFee,
-    group_students: groupStudents.map((s) => s.name ?? ''),
-    total,
+    ...statement,
     dues,
     total_due: round2(dues.reduce((sum, d) => sum + d.amount, 0)),
-    flags,
-    needs_attention: packaged.some((s) => studentNeedsAttention(s, catalog)),
   };
+}
+
+/**
+ * A statement for a month from before Billing v2, built from that month's
+ * billing records alone: each record's stored amount is the calculated due.
+ * No line breakdown is invented. Null when the family has no record.
+ */
+export function buildLegacyStatement(
+  contact: Pick<Contact, 'id' | 'first_name' | 'last_name'>,
+  month: string,
+  records: BillingRecord[],
+  frozenAt: string,
+): Statement | null {
+  const own = records
+    .filter(
+      (r) =>
+        r.contact_id === contact.id &&
+        typeof r.period_start === 'string' &&
+        r.period_start.slice(0, 7) === month &&
+        /^\d{4}-\d{2}-\d{2}$/.test(r.period_start),
+    )
+    .sort((a, b) => (a.period_start < b.period_start ? -1 : 1));
+  if (own.length === 0) return null;
+  const semi = own.some(
+    (r) => r.cycle === 'semi_monthly' || r.cycle === 'biweekly',
+  );
+  const dues: StatementDue[] = own.map((r) => {
+    const amount = round2(typeof r.amount === 'number' ? r.amount : 0);
+    return {
+      day: Number(r.period_start.slice(8, 10)),
+      period_start: r.period_start,
+      derived: amount,
+      override: null,
+      amount,
+      paid: false,
+    };
+  });
+  const total = round2(dues.reduce((sum, d) => sum + d.derived, 0));
+  return applyRecords(
+    {
+      contact_id: contact.id!,
+      contact_name:
+        `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim(),
+      month,
+      cycle: semi ? 'semi_monthly' : 'monthly',
+      lines: [],
+      package_gross: total,
+      package_subtotal: total,
+      sibling_discount_percent: 0,
+      sibling_discount_amount: 0,
+      group_fee: 0,
+      group_students: [],
+      total,
+      dues,
+      total_due: total,
+      flags: [],
+      needs_attention: false,
+      frozen_at: frozenAt,
+      legacy: true,
+    },
+    own,
+  );
 }
 
 /** Every family's statement for a month, sorted by contact name. */

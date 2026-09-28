@@ -4,6 +4,8 @@ import { BillingRecord } from '../models/billing-record.model';
 import { PackageCatalog } from './package-config';
 import { studentMonthlyCharge } from './billing-amount';
 import {
+  applyRecords,
+  buildLegacyStatement,
   buildStatement,
   buildStatements,
   countSlotsBetween,
@@ -1369,5 +1371,237 @@ describe('parity with the v1 formulas', () => {
         studentMonthlyCharge(s, Y, month, catalog),
       ]);
     }
+  });
+});
+
+describe('applyRecords', () => {
+  const record = (overrides: Partial<BillingRecord>): BillingRecord => ({
+    contact_id: 'c-1',
+    period_start: '2026-09-01',
+    cycle: 'monthly',
+    amount: 273,
+    paid: false,
+    ...overrides,
+  });
+
+  it('lays paid state and overrides over a stored statement without touching its amounts', () => {
+    const frozen = {
+      ...statementFor([student()]),
+      frozen_at: '2026-10-01T06:00:00.000Z',
+    };
+    const merged = applyRecords(frozen, [
+      record({
+        paid: true,
+        paid_date: '2026-10-03T12:00:00.000Z',
+        invoice_number: 'INV-9',
+        amount_override: 250,
+      }),
+    ]);
+    expect(merged.dues).toEqual([
+      {
+        day: 1,
+        period_start: '2026-09-01',
+        derived: 273,
+        override: 250,
+        amount: 250,
+        paid: true,
+        paid_date: '2026-10-03T12:00:00.000Z',
+        invoice_number: 'INV-9',
+      },
+    ]);
+    expect(merged.total).toBe(273);
+    expect(merged.total_due).toBe(250);
+    expect(merged.frozen_at).toBe('2026-10-01T06:00:00.000Z');
+    expect(merged.lines).toBe(frozen.lines);
+    // The stored statement is never mutated.
+    expect(frozen.dues[0].override).toBeNull();
+    expect(frozen.total_due).toBe(273);
+  });
+
+  it('a record that was cleared or removed returns the due to its calculated amount', () => {
+    const once = applyRecords(statementFor([student()]), [
+      record({ amount_override: 0, paid: true }),
+    ]);
+    expect(once.total_due).toBe(0);
+    const later = applyRecords(once, []);
+    expect(later.dues[0]).toEqual({
+      day: 1,
+      period_start: '2026-09-01',
+      derived: 273,
+      override: null,
+      amount: 273,
+      paid: false,
+    });
+    expect(later.total_due).toBe(273);
+  });
+
+  it('re-rounds the total due', () => {
+    const semi = statementFor(
+      [student()],
+      contact({ billing_cycle: 'semi_monthly' }),
+    );
+    const merged = applyRecords(semi, [
+      record({ amount_override: 0.1 }),
+      record({ period_start: '2026-09-15', amount_override: 0.2 }),
+    ]);
+    expect(merged.total_due).toBe(0.3);
+  });
+});
+
+describe('buildLegacyStatement', () => {
+  const FROZEN = '2026-09-28T12:00:00.000Z';
+  const robin = { id: 'c-1', first_name: 'Robin', last_name: 'Reed' };
+  const record = (overrides: Partial<BillingRecord>): BillingRecord => ({
+    contact_id: 'c-1',
+    period_start: '2026-07-01',
+    cycle: 'monthly',
+    amount: 362,
+    paid: true,
+    paid_date: '2026-07-02T12:00:00.000Z',
+    ...overrides,
+  });
+
+  it('is built from the stored amounts alone, with no lines', () => {
+    expect(
+      buildLegacyStatement(robin, '2026-07', [record({})], FROZEN),
+    ).toEqual({
+      contact_id: 'c-1',
+      contact_name: 'Robin Reed',
+      month: '2026-07',
+      cycle: 'monthly',
+      lines: [],
+      package_gross: 362,
+      package_subtotal: 362,
+      sibling_discount_percent: 0,
+      sibling_discount_amount: 0,
+      group_fee: 0,
+      group_students: [],
+      total: 362,
+      dues: [
+        {
+          day: 1,
+          period_start: '2026-07-01',
+          derived: 362,
+          override: null,
+          amount: 362,
+          paid: true,
+          paid_date: '2026-07-02T12:00:00.000Z',
+        },
+      ],
+      total_due: 362,
+      flags: [],
+      needs_attention: false,
+      frozen_at: FROZEN,
+      legacy: true,
+    });
+  });
+
+  it('keeps both halves of a semi-monthly family in date order', () => {
+    const s = buildLegacyStatement(
+      robin,
+      '2026-07',
+      [
+        record({
+          period_start: '2026-07-15',
+          cycle: 'semi_monthly',
+          amount: 181.01,
+          paid: false,
+        }),
+        record({ cycle: 'semi_monthly', amount: 181 }),
+      ],
+      FROZEN,
+    )!;
+    expect(s.cycle).toBe('semi_monthly');
+    expect(s.dues.map((d) => [d.day, d.derived, d.paid])).toEqual([
+      [1, 181, true],
+      [15, 181.01, false],
+    ]);
+    expect(s.total).toBe(362.01);
+  });
+
+  it('treats the old biweekly cycle as semi-monthly', () => {
+    expect(
+      buildLegacyStatement(
+        robin,
+        '2026-07',
+        [record({ cycle: 'biweekly' })],
+        FROZEN,
+      )!.cycle,
+    ).toBe('semi_monthly');
+  });
+
+  it('keeps an override on top of the stored amount', () => {
+    const s = buildLegacyStatement(
+      robin,
+      '2026-07',
+      [record({ amount_override: 300 })],
+      FROZEN,
+    )!;
+    expect(s.dues[0]).toEqual(
+      expect.objectContaining({ derived: 362, override: 300, amount: 300 }),
+    );
+    expect(s.total).toBe(362);
+    expect(s.total_due).toBe(300);
+  });
+
+  it('ignores other families, other months, locks and malformed rows', () => {
+    const s = buildLegacyStatement(
+      robin,
+      '2026-07',
+      [
+        record({ contact_id: 'c-2' }),
+        record({ period_start: '2026-08-01' }),
+        record({ period_start: '2026-06-15' }),
+        record({ period_start: '2026-07' }),
+        record({ period_start: undefined as unknown as string }),
+        record({ period_start: 'lock#auto-renew#2026-07' }),
+        record({ amount: 100 }),
+      ],
+      FROZEN,
+    )!;
+    expect(s.dues).toHaveLength(1);
+    expect(s.total).toBe(100);
+  });
+
+  it('is null when the family has no record that month', () => {
+    expect(buildLegacyStatement(robin, '2026-07', [], FROZEN)).toBeNull();
+    expect(
+      buildLegacyStatement(
+        robin,
+        '2026-07',
+        [record({ contact_id: 'c-2' })],
+        FROZEN,
+      ),
+    ).toBeNull();
+  });
+
+  it('tolerates a missing amount and a partial name', () => {
+    const s = buildLegacyStatement(
+      {
+        id: 'c-1',
+        first_name: 'Robin',
+        last_name: undefined as unknown as string,
+      },
+      '2026-07',
+      [
+        record({ amount: undefined as unknown as number }),
+        record({ period_start: '2026-07-15', amount: 0.105 }),
+      ],
+      FROZEN,
+    )!;
+    expect(s.contact_name).toBe('Robin');
+    expect(s.dues.map((d) => d.derived)).toEqual([0, 0.11]);
+    expect(
+      buildLegacyStatement(
+        {
+          id: 'c-1',
+          first_name: undefined as unknown as string,
+          last_name: 'Reed',
+        },
+        '2026-07',
+        [record({})],
+        FROZEN,
+      )!.contact_name,
+    ).toBe('Reed');
   });
 });
