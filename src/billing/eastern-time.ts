@@ -94,3 +94,47 @@ export function easternSlotToUtc(
   const [h, m] = (time ?? '').split(':').map(Number);
   return easternWallTimeToUtc(year, month, day, h || 0, m || 0);
 }
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/** 'YYYY-MM-DD' for a 0-indexed month. */
+export function dateKey(year: number, month: number, day: number): string {
+  return `${year}-${pad2(month + 1)}-${pad2(day)}`;
+}
+
+/** The date part of a stored date or datetime string. */
+export function keyOf(value: string | undefined | null): string | undefined {
+  if (typeof value !== 'string' || value.length < 10) return undefined;
+  return value.slice(0, 10);
+}
+
+/** The calendar day before a 'YYYY-MM-DD' key. */
+export function dayBefore(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d - 1);
+  return dateKey(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** The last day ('YYYY-MM-DD') of a possibly-overflowed 0-indexed month. */
+export function lastDayOfMonth(year: number, month: number): string {
+  const date = new Date(year, month + 1, 0);
+  return dateKey(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+const easternDate = new Intl.DateTimeFormat('en-CA', {
+  timeZone: EASTERN_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** The Eastern calendar date ('YYYY-MM-DD') of an instant. */
+export function easternDateKey(at: Date): string {
+  return easternDate.format(at);
+}
+
+/** The UTC instant the Eastern day AFTER a 'YYYY-MM-DD' key begins. */
+export function dayAfterStartIso(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return easternSlotToUtc(y, m - 1, d + 1, '00:00').toISOString();
+}

@@ -229,7 +229,7 @@ export class PackageChangeNoticeService {
       ``,
       blocks.join('\n\n'),
       ``,
-      `Billing switches to the new package from the effective month automatically. This notice is sent once per scheduled change.`,
+      `Billing switches to the new package from the effective date, prorated automatically. This notice is sent once per scheduled change.`,
       ``,
       `— Beyond the Chalkboard Tutoring`,
     ].join('\n');
@@ -249,7 +249,12 @@ export class PackageChangeNoticeService {
   /** 'Custom ($400/mo, 2×45 min)' or the package name. */
   private describePackage(c: PendingChange): string {
     const name = c.package || '—';
-    if (name !== CUSTOM_PACKAGE) return name;
+    if (name !== CUSTOM_PACKAGE) {
+      // A custom price set for the new package (Billing v2).
+      return typeof c.price_override === 'number'
+        ? `${name} (custom price $${c.price_override}/mo)`
+        : name;
+    }
     const parts: string[] = [];
     if (c.custom_monthly_cost !== undefined) {
       parts.push(`$${c.custom_monthly_cost}/mo`);

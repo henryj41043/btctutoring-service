@@ -951,4 +951,78 @@ describe('AutoRenewService', () => {
       expect(billing.createBillingRecordIfAbsent).not.toHaveBeenCalled();
     });
   });
+
+  describe('package changes on any date', () => {
+    const friday = [
+      { weekday: 'FRIDAY', start_time: '09:00', end_time: '09:30' },
+    ];
+    const amounts = (): [string, number][] =>
+      billing.createBillingRecordIfAbsent.mock.calls.map((c) => [
+        c[0].period_start,
+        c[0].amount,
+      ]);
+
+    it('a change later in the month splits the sessions and the bill on its date', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          pending_changes: [
+            { package: 'Excel', effective: '2026-07-15', schedule: friday },
+          ],
+        }),
+      ]);
+      await service.runAutoRenew(july);
+      expect(students.promotePendingChanges).not.toHaveBeenCalled();
+      const created = sessions.createSessions.mock.calls[0][0] as {
+        start_datetime: string;
+      }[];
+      // Old slots to Jul 14 (Wed 1, 8 + Mon 6, 13); Fridays 17, 24, 31 after.
+      expect(created.map((s) => s.start_datetime.slice(0, 10)).sort()).toEqual([
+        '2026-07-01',
+        '2026-07-06',
+        '2026-07-08',
+        '2026-07-13',
+        '2026-07-17',
+        '2026-07-24',
+        '2026-07-31',
+      ]);
+      const [[period, amount]] = amounts();
+      expect(period).toBe('2026-07-01');
+      // 4 sessions of Succeed ($41.77) + 3 of Excel: neither a full month.
+      expect(amount).toBeGreaterThan(4 * 41.77);
+      expect(amount).not.toBe(362);
+    });
+
+    it('a change due on the 1st is promoted with its price and billed from history', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          price_override: 300,
+          pending_changes: [
+            {
+              package: 'Succeed',
+              effective: '2026-07-01',
+              price_override: 250,
+            },
+          ],
+        }),
+      ]);
+      await service.runAutoRenew(july);
+      expect(students.promotePendingChanges).toHaveBeenCalledWith(
+        expect.objectContaining({ price_override: 300 }),
+        '2026-07-01',
+      );
+      // July bills the change's own price, not the old custom price.
+      expect(amounts()).toEqual([['2026-07-01', 250]]);
+    });
+
+    it('a promoted change without a price resets the custom price', async () => {
+      students.getStudents.mockResolvedValue([
+        student({
+          price_override: 300,
+          pending_changes: [{ package: 'Succeed', effective: '2026-07-01' }],
+        }),
+      ]);
+      await service.runAutoRenew(july);
+      expect(amounts()).toEqual([['2026-07-01', 362]]);
+    });
+  });
 });

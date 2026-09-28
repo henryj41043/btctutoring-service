@@ -5,12 +5,13 @@ import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
 import { OnboardingRow } from '../models/onboarding-row.model';
 import { STUDENT_STATUS } from './student-status';
-import { CUSTOM_PACKAGE } from '../billing/package-config';
 import { randomUUID } from 'crypto';
+import { easternDateKey, lastDayOfMonth } from '../billing/eastern-time';
+import { HORIZON_MONTHS_AHEAD } from '../sessions/session-builder';
 import {
   LEGACY_PENDING_FIELDS,
+  applyPromotion,
   pendingChangesOf,
-  planPromotion,
   sanitizePendingChanges,
   withNoticeSent,
 } from './pending-changes';
@@ -168,6 +169,79 @@ export class StudentsService {
       throw new BadRequestException(
         `end_status must be one of: ${END_STATUSES.join(', ')}.`,
       );
+    }
+  }
+
+  /**
+   * Validates a scheduled-change list before anything is written: real,
+   * unique dates and sane prices. A date that is not already stored must
+   * be in the future (Eastern) and inside the calendar look-ahead.
+   */
+  private async assertPendingChanges(
+    student: Student,
+    now: Date,
+  ): Promise<void> {
+    if (
+      !Array.isArray(student.pending_changes) ||
+      student.pending_changes.length === 0
+    ) {
+      return;
+    }
+    const changes = sanitizePendingChanges(student.pending_changes);
+    const seen = new Set<string>();
+    for (const change of changes) {
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(change.effective) ||
+        isNaN(Date.parse(`${change.effective}T00:00:00Z`))
+      ) {
+        throw new BadRequestException(
+          'A scheduled change date must be formatted YYYY-MM-DD.',
+        );
+      }
+      if (seen.has(change.effective)) {
+        throw new BadRequestException(
+          'Two scheduled changes share the same date.',
+        );
+      }
+      seen.add(change.effective);
+    }
+    for (const raw of student.pending_changes as unknown[]) {
+      const price = (raw as { price_override?: unknown } | null)
+        ?.price_override;
+      if (
+        price !== undefined &&
+        price !== null &&
+        (typeof price !== 'number' || !Number.isFinite(price) || price < 0)
+      ) {
+        throw new BadRequestException(
+          "A scheduled change's price_override must be a non-negative number.",
+        );
+      }
+    }
+
+    const stored = student.id
+      ? ((await StudentsModel.get(student.id).catch(() => undefined)) as
+          | Student
+          | undefined)
+      : undefined;
+    const storedDates = new Set(
+      stored ? pendingChangesOf(stored).map((c) => c.effective) : [],
+    );
+    const today = easternDateKey(now);
+    const [year, month] = today.split('-').map(Number);
+    const latest = lastDayOfMonth(year, month - 1 + HORIZON_MONTHS_AHEAD);
+    for (const change of changes) {
+      if (storedDates.has(change.effective)) continue;
+      if (change.effective <= today) {
+        throw new BadRequestException(
+          'A scheduled change must take effect on a future date.',
+        );
+      }
+      if (change.effective > latest) {
+        throw new BadRequestException(
+          `A scheduled change can be set no later than ${latest}.`,
+        );
+      }
     }
   }
 
@@ -413,9 +487,10 @@ export class StudentsService {
     };
   }
 
-  async createStudent(student: Student) {
+  async createStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    await this.assertPendingChanges(student, now);
     const newUuid: string = randomUUID();
     const attributes = this.buildStudentAttributes(student);
     // New students start in onboarding: the client only supplies a name, so
@@ -444,9 +519,10 @@ export class StudentsService {
       });
   }
 
-  async updateStudent(student: Student) {
+  async updateStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    await this.assertPendingChanges(student, now);
     const attributes = this.buildStudentAttributes(student);
     // An explicitly empty schedule/batch list means "clear it". dynamoose only
     // $SETs provided keys (and buildStudentAttributes drops empty arrays), so an
@@ -562,54 +638,17 @@ export class StudentsService {
   }
 
   /**
-   * Applies every scheduled change whose effective date has arrived
-   * (`<= monthStartKey`, 'YYYY-MM-01') in one write: the LAST due change's
-   * package (and CUSTOM overrides) becomes current, the last due change that
-   * carries a schedule replaces the weekly slots, package_start_date becomes
-   * the last due effective date, the future changes are written back as the
-   * list (or the attribute is removed when none remain), and the legacy
-   * scalars leave. No-op when nothing is due. Called by the 1st-of-month
-   * cron; a direct model update because buildStudentAttributes has no
-   * scalar-$REMOVE path.
+   * Applies every scheduled change due on or before `dayKey` ('YYYY-MM-DD')
+   * in one write (see applyPromotion): the closed package goes to
+   * package_history and the last due change becomes current. No-op when
+   * nothing is due. Called by the daily and the 1st-of-month jobs.
    */
-  async promotePendingChanges(
-    student: Student,
-    monthStartKey: string,
-  ): Promise<void> {
-    const plan = planPromotion(student, monthStartKey);
-    if (!plan) return;
-    const isCustom = plan.last.package === CUSTOM_PACKAGE;
-    const sets: Record<string, unknown> = {
-      package: plan.last.package,
-      // Zoneless local-wall stamp (mid-month precedent): a bare 'YYYY-MM-DD'
-      // parses as UTC midnight, which reads as the prior evening on an
-      // Eastern browser and mis-prorates the effective month.
-      package_start_date: `${plan.last.effective}T00:00:00`,
-    };
-    if (isCustom) {
-      sets.custom_monthly_cost = plan.last.custom_monthly_cost;
-      sets.custom_sessions_per_week = plan.last.custom_sessions_per_week;
-      sets.custom_session_length_min = plan.last.custom_session_length_min;
-    }
-    if (plan.schedule) sets.schedule = plan.schedule;
-    if (plan.remaining.length > 0) sets.pending_changes = plan.remaining;
-    // dynamoose rejects undefined $SET values (an incomplete CUSTOM change).
-    for (const key of Object.keys(sets)) {
-      if (sets[key] === undefined) delete sets[key];
-    }
-    const removes: string[] = [...LEGACY_PENDING_FIELDS];
-    if (plan.remaining.length === 0) removes.push('pending_changes');
-    if (!isCustom) {
-      // Stale overrides must not leak into a later switch to CUSTOM.
-      removes.push(
-        'custom_monthly_cost',
-        'custom_sessions_per_week',
-        'custom_session_length_min',
-      );
-    }
+  async promotePendingChanges(student: Student, dayKey: string): Promise<void> {
+    const result = applyPromotion(student, dayKey);
+    if (!result) return;
     await StudentsModel.update(
       { id: student.id },
-      { $SET: sets, $REMOVE: removes },
+      { $SET: result.sets, $REMOVE: result.removes },
     ).catch((error: Error) => {
       Logger.error(error.message, error);
       return Promise.reject(error);

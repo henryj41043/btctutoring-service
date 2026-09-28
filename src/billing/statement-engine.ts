@@ -15,6 +15,9 @@ import {
   round2,
 } from './package-config';
 import { GROUP_MONTHLY_FEE, siblingDiscountedTotal } from './billing-amount';
+import { dateKey, dayBefore, keyOf } from './eastern-time';
+
+export { dateKey, dayBefore, keyOf };
 
 /**
  * Billing v2 statement engine (pure — no Nest deps). The single source of
@@ -123,24 +126,6 @@ export interface Statement {
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0');
-
-/** 'YYYY-MM-DD' for a 0-indexed month. */
-export function dateKey(year: number, month: number, day: number): string {
-  return `${year}-${pad(month + 1)}-${pad(day)}`;
-}
-
-/** The date part of a stored date or datetime string. */
-export function keyOf(value: string | undefined | null): string | undefined {
-  if (typeof value !== 'string' || value.length < 10) return undefined;
-  return value.slice(0, 10);
-}
-
-/** The calendar day before a 'YYYY-MM-DD' key. */
-export function dayBefore(key: string): string {
-  const [y, m, d] = key.split('-').map(Number);
-  const date = new Date(y, m - 1, d - 1);
-  return dateKey(date.getFullYear(), date.getMonth(), date.getDate());
-}
 
 /** Parses 'YYYY-MM' into a year and 0-indexed month; null when malformed. */
 export function parseMonth(
