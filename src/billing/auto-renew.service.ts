@@ -342,7 +342,9 @@ export class AutoRenewService {
         month,
         seriesIdByTutor,
       });
-      for (const s of built) seriesIdByTutor.set(s.tutor_id, s.series_id!);
+      for (const s of built) {
+        if (s.series_id) seriesIdByTutor.set(s.tutor_id, s.series_id);
+      }
       sessions.push(...built);
     }
     return sessions;

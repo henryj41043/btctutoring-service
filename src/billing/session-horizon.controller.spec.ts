@@ -69,4 +69,51 @@ describe('SessionHorizonController', () => {
       ),
     ).rejects.toThrow('Unauthorized');
   });
+
+  describe('rebuild from a date', () => {
+    it('passes the date through for one student', async () => {
+      await controller.fill(reqAs(admin), 's-1', '2026-10-14');
+      expect(horizon.fillHorizon).toHaveBeenCalledWith(expect.any(Date), {
+        lock: false,
+        studentId: 's-1',
+        rebuildFrom: '2026-10-14',
+      });
+    });
+
+    it('needs a student', async () => {
+      await expect(
+        controller.fill(reqAs(admin), undefined, '2026-10-14'),
+      ).rejects.toThrow('from requires a student.');
+      await expect(
+        controller.fill(reqAs(admin), '', '2026-10-14'),
+      ).rejects.toThrow('from requires a student.');
+      expect(horizon.fillHorizon).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['2026-10'],
+      ['10/14/2026'],
+      ['2026-13-40'],
+      ['2026-10-14T00:00'],
+    ])('rejects the date %s', async (from) => {
+      await expect(controller.fill(reqAs(admin), 's-1', from)).rejects.toThrow(
+        'from must be formatted YYYY-MM-DD.',
+      );
+      expect(horizon.fillHorizon).not.toHaveBeenCalled();
+    });
+
+    it('an empty date is an ordinary fill', async () => {
+      await controller.fill(reqAs(admin), 's-1', '');
+      expect(horizon.fillHorizon).toHaveBeenCalledWith(expect.any(Date), {
+        lock: false,
+        studentId: 's-1',
+      });
+    });
+
+    it('non-admin is unauthorized before any validation', async () => {
+      await expect(
+        controller.fill(reqAs(tutor), undefined, 'nope'),
+      ).rejects.toThrow('Unauthorized');
+    });
+  });
 });
