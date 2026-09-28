@@ -5,6 +5,8 @@ import { SessionsService } from '../../src/sessions/sessions.service';
 import { TeamsService } from '../../src/teams/teams.service';
 import { SessionsModel } from '../../src/models/sessions.model';
 import { TeamsModel } from '../../src/models/teams.model';
+import { StudentsModel } from '../../src/models/students.model';
+import { ContactsModel } from '../../src/models/contacts.model';
 import { ModelMock, scanResolves } from '../model-mock';
 import { bootIntegrationApp } from './helpers';
 
@@ -14,9 +16,17 @@ jest.mock('../../src/models/sessions.model', () => ({
 jest.mock('../../src/models/teams.model', () => ({
   TeamsModel: require('../model-mock').makeModelMock(),
 }));
+jest.mock('../../src/models/students.model', () => ({
+  StudentsModel: require('../model-mock').makeModelMock(),
+}));
+jest.mock('../../src/models/contacts.model', () => ({
+  ContactsModel: require('../model-mock').makeModelMock(),
+}));
 
 const Model = SessionsModel as unknown as ModelMock;
 const TeamModel = TeamsModel as unknown as ModelMock;
+const StudentModel = StudentsModel as unknown as ModelMock;
+const ContactModel = ContactsModel as unknown as ModelMock;
 
 describe('Sessions (integration)', () => {
   let app: INestApplication;
@@ -173,5 +183,153 @@ describe('Sessions (integration)', () => {
       .set('x-test-role', 'lead')
       .send({ id: 's-2', tutor_id: 'contact-tutor' });
     expect(denied.status).toBe(403);
+  });
+
+  describe('attendance', () => {
+    const START = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const END = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stored = (over: Record<string, unknown> = {}) => ({
+      id: 's-1',
+      type: 'TUTORING',
+      status: 'Pending',
+      notes: '',
+      start_datetime: START,
+      end_datetime: END,
+      student_id: 'st-1',
+      tutor_id: 'contact-tutor',
+      tutor_name: 'Tess',
+      ...over,
+    });
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      Model.get.mockResolvedValue(stored());
+      Model.update.mockImplementation((_k: unknown, attrs: object) =>
+        Promise.resolve({ ...stored(), ...attrs }),
+      );
+      StudentModel.get.mockResolvedValue({
+        id: 'st-1',
+        name: 'Pat',
+        make_up_minutes: 0,
+      });
+      StudentModel.update.mockResolvedValue({});
+      ContactModel.get.mockResolvedValue({ first_name: 'Abby' });
+    });
+
+    it('a tutor takes attendance on their own session; a cancellation banks the minutes', async () => {
+      const res = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'tutor')
+        .send({ status: 'Cancelled', notes: 'Family cancelled' });
+      expect(res.status).toBe(200);
+      expect(res.body.makeup).toEqual({
+        before: 0,
+        after: 60,
+        delta: 60,
+        unrecovered: 0,
+      });
+      expect(res.body.session.status).toBe('Cancelled');
+      expect(StudentModel.update).toHaveBeenCalledWith(
+        { id: 'st-1' },
+        {
+          make_up_minutes: 60,
+          make_up_batches: [{ minutes: 60, earned_date: START }],
+        },
+      );
+    });
+
+    it('a tutor cannot change attendance that was already taken', async () => {
+      Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+      const viaAttendance = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'tutor')
+        .send({ status: 'Cancelled', reason: 'oops' });
+      expect(viaAttendance.status).toBe(403);
+      const viaUpdate = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send(stored({ status: 'Pending' }));
+      expect(viaUpdate.status).toBe(403);
+      const moved = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send(
+          stored({
+            status: 'Completed',
+            start_datetime: new Date().toISOString(),
+          }),
+        );
+      expect(moved.status).toBe(403);
+      expect(Model.update).not.toHaveBeenCalled();
+      expect(StudentModel.update).not.toHaveBeenCalled();
+    });
+
+    it('a tutor may still edit the notes of a finalized session', async () => {
+      Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+      const res = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send(stored({ status: 'Completed', notes: 'fixed a typo' }));
+      expect(res.status).toBe(200);
+      expect(Model.update).toHaveBeenCalled();
+    });
+
+    it('an admin corrects attendance with a reason; without one it is refused', async () => {
+      Model.get.mockResolvedValue(stored({ status: 'Cancelled' }));
+      StudentModel.get.mockResolvedValue({
+        id: 'st-1',
+        name: 'Pat',
+        make_up_minutes: 60,
+        make_up_batches: [{ minutes: 60, earned_date: START }],
+      });
+      const refused = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'admin')
+        .send({ status: 'Completed' });
+      expect(refused.status).toBe(400);
+
+      const res = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'admin')
+        .send({ status: 'Completed', reason: 'Marked the wrong session' });
+      expect(res.status).toBe(200);
+      expect(res.body.makeup.delta).toBe(-60);
+      expect(res.body.session.attendance_history.at(-1)).toEqual(
+        expect.objectContaining({
+          from: 'Cancelled',
+          to: 'Completed',
+          by: 'contact-admin',
+          reason: 'Marked the wrong session',
+        }),
+      );
+    });
+
+    it('a dry run previews the change and writes nothing', async () => {
+      const res = await request(server())
+        .put('/sessions/s-1/attendance?dry_run=true')
+        .set('x-test-role', 'tutor')
+        .send({ status: 'Cancelled' });
+      expect(res.status).toBe(200);
+      expect(res.body.dry_run).toBe(true);
+      expect(res.body.makeup.delta).toBe(60);
+      expect(Model.update).not.toHaveBeenCalled();
+      expect(StudentModel.update).not.toHaveBeenCalled();
+    });
+
+    it('another tutor is refused and an unknown session is a 404', async () => {
+      Model.get.mockResolvedValue(stored({ tutor_id: 'someone-else' }));
+      const other = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'tutor')
+        .send({ status: 'Completed' });
+      expect(other.status).toBe(403);
+      Model.get.mockResolvedValue(undefined);
+      const missing = await request(server())
+        .put('/sessions/s-404/attendance')
+        .set('x-test-role', 'admin')
+        .send({ status: 'Completed' });
+      expect(missing.status).toBe(404);
+    });
   });
 });

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -12,7 +13,17 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { SessionsService, SessionRange } from './sessions.service';
+import {
+  AttendanceRequest,
+  AttendanceResult,
+  SessionsService,
+  SessionRange,
+} from './sessions.service';
+import {
+  ATTENDANCE_FINAL_MESSAGE,
+  isFinalized,
+  lockedFieldChanges,
+} from './attendance';
 import { TeamsService } from '../teams/teams.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
@@ -143,9 +154,6 @@ export class SessionsController {
     const user: User = req.user as User;
     const groups: string[] = user.groups ?? [];
     const isAdmin: boolean = groups.includes('Admins');
-    if (isAdmin) {
-      return this.sessionsService.updateSession(session);
-    }
     // Leads may edit their OWN sessions like any tutor — team visibility is
     // read-only, so members' sessions never pass the ownership checks below.
     // Sessions store tutor_id = the tutor's contact id (not their email).
@@ -155,14 +163,57 @@ export class SessionsController {
     // own tutor_id in the payload.
     const idMatchesTutor: boolean =
       !!session.tutor_id && session.tutor_id === user.contact;
-    if (isTutorLike(groups) && idMatchesTutor && session.id) {
-      const stored = await this.sessionsService.getSessionById(session.id);
-      if (stored && stored.tutor_id === user.contact) {
-        return this.sessionsService.updateSession(session);
+    const mayOwn: boolean =
+      isTutorLike(groups) && idMatchesTutor && !!session.id;
+    if (!isAdmin && !mayOwn) {
+      Logger.error('Invalid credentials for the session being edited');
+      throw new ForbiddenException('Unauthorized');
+    }
+    // The attendance lock needs the STORED session, whoever is calling.
+    const stored = session.id
+      ? await this.sessionsService.getSessionById(session.id)
+      : undefined;
+    if (!isAdmin && (!stored || stored.tutor_id !== user.contact)) {
+      Logger.error('Invalid credentials for the session being edited');
+      throw new ForbiddenException('Unauthorized');
+    }
+    if (stored && isFinalized(stored.status)) {
+      const locked = lockedFieldChanges(stored, session);
+      // A status change here would skip the make-up minute correction.
+      if (locked.includes('status')) {
+        if (!isAdmin) {
+          throw new ForbiddenException(ATTENDANCE_FINAL_MESSAGE);
+        }
+        throw new BadRequestException(
+          'Attendance was already taken: change it with PUT /sessions/:id/attendance.',
+        );
+      }
+      if (!isAdmin && locked.length > 0) {
+        Logger.error(
+          `Finalized session ${session.id}: refused a change to ${locked.join(', ')}`,
+        );
+        throw new ForbiddenException(ATTENDANCE_FINAL_MESSAGE);
       }
     }
-    Logger.error('Invalid credentials for the session being edited');
-    throw new ForbiddenException('Unauthorized');
+    return this.sessionsService.updateSession(session);
+  }
+
+  /**
+   * Takes or corrects attendance (see SessionsService.setAttendance). With
+   * `?dry_run=true` nothing is written: the result is the preview shown
+   * before an admin confirms a correction.
+   */
+  @Put(':id/attendance')
+  @UseGuards(AuthGuard('jwt'))
+  async setAttendance(
+    @Request() req: express.Request,
+    @Param('id') id: string,
+    @Body() request: AttendanceRequest,
+    @Query('dry_run') dryRun?: string,
+  ): Promise<AttendanceResult> {
+    return this.sessionsService.setAttendance(id, request, req.user as User, {
+      dryRun: dryRun === 'true',
+    });
   }
 
   @Post(':id/email-notes')

@@ -507,4 +507,520 @@ describe('SessionsService', () => {
       );
     });
   });
+
+  describe('setAttendance', () => {
+    const NOW = new Date('2026-09-28T16:00:00.000Z');
+    const START = '2026-09-21T14:00:00.000Z';
+    const stored = (over: Partial<Session> = {}): Session =>
+      sampleSession({
+        start_datetime: START,
+        end_datetime: '2026-09-21T15:00:00.000Z',
+        tutor_id: 'c-tutor',
+        ...over,
+      });
+    const pat = (over: Record<string, unknown> = {}) => ({
+      id: 'student-1',
+      name: 'Pat',
+      make_up_minutes: 120,
+      make_up_batches: [
+        { minutes: 120, earned_date: '2026-09-01T14:00:00.000Z' },
+      ],
+      ...over,
+    });
+    const admin = {
+      username: 'a',
+      email: 'a@x.com',
+      groups: ['Admins'],
+      contact: 'c-admin',
+    };
+    const tutor = {
+      username: 't',
+      email: 't@x.com',
+      groups: ['Tutors'],
+      contact: 'c-tutor',
+    };
+    const lead = { ...tutor, groups: ['LeadTutors'], contact: 'c-lead' };
+    const take = (
+      request: Record<string, unknown>,
+      user: typeof admin = tutor,
+      dryRun = false,
+    ) =>
+      service.setAttendance('session-1', request as never, user, {
+        dryRun,
+        now: NOW,
+      });
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      Model.get.mockResolvedValue(stored());
+      Model.update.mockImplementation((_key: unknown, attrs: object) =>
+        Promise.resolve({ ...stored(), ...attrs }),
+      );
+      Students.get.mockResolvedValue(pat());
+      Students.update.mockResolvedValue({});
+      Contacts.get.mockResolvedValue({ first_name: 'Tess', last_name: 'One' });
+    });
+
+    describe('first attendance', () => {
+      it('the session tutor completes a tutoring session: status, notes and history, no minutes moved', async () => {
+        const res = await take({ status: 'Completed', notes: 'Went well' });
+        expect(Students.update).not.toHaveBeenCalled();
+        expect(Model.update).toHaveBeenCalledWith(
+          { id: 'session-1' },
+          {
+            status: 'Completed',
+            notes: 'Went well',
+            attendance_history: [
+              {
+                from: 'Pending',
+                to: 'Completed',
+                by: 'c-tutor',
+                by_name: 'Tess One',
+                at: NOW.toISOString(),
+                minutes_delta: 0,
+              },
+            ],
+          },
+        );
+        expect(res.dry_run).toBe(false);
+        expect(res.session.status).toBe('Completed');
+        expect(res.makeup).toEqual({
+          before: 120,
+          after: 120,
+          delta: 0,
+          unrecovered: 0,
+        });
+      });
+
+      it('a cancelled tutoring session banks its minutes on the student, then saves the session', async () => {
+        const res = await take({ status: 'Cancelled' });
+        expect(Students.update).toHaveBeenCalledWith(
+          { id: 'student-1' },
+          {
+            make_up_minutes: 180,
+            make_up_batches: [
+              { minutes: 120, earned_date: '2026-09-01T14:00:00.000Z' },
+              { minutes: 60, earned_date: START },
+            ],
+          },
+        );
+        expect(Students.update.mock.invocationCallOrder[0]).toBeLessThan(
+          Model.update.mock.invocationCallOrder[0],
+        );
+        const attrs = Model.update.mock.calls[0][1];
+        expect(attrs.attendance_history[0].minutes_delta).toBe(60);
+        expect('notes' in attrs).toBe(false);
+        expect(res.makeup.after).toBe(180);
+      });
+
+      it('a make-up that uses the last minutes clears the batch list', async () => {
+        Model.get.mockResolvedValue(
+          stored({
+            type: SessionType.MAKE_UP,
+            end_datetime: '2026-09-21T16:00:00.000Z',
+          }),
+        );
+        await take({ status: 'Completed' });
+        expect(Students.update).toHaveBeenCalledWith(
+          { id: 'student-1' },
+          { $SET: { make_up_minutes: 0 }, $REMOVE: ['make_up_batches'] },
+        );
+      });
+
+      it('refuses a make-up the student has no minutes for', async () => {
+        Model.get.mockResolvedValue(stored({ type: SessionType.MAKE_UP }));
+        Students.get.mockResolvedValue(
+          pat({
+            make_up_batches: [{ minutes: 20, earned_date: START }],
+          }),
+        );
+        await expect(take({ status: 'Completed' })).rejects.toThrow(
+          'Not enough make-up minutes. Pat has 20 min but this session requires 60 min.',
+        );
+        await expect(take({ status: 'NCNS' })).rejects.toThrow(
+          BadRequestException,
+        );
+        // Cancelling it needs no minutes.
+        await expect(take({ status: 'Cancelled' })).resolves.toBeDefined();
+        expect(Students.update).not.toHaveBeenCalled();
+      });
+
+      it('names a nameless student generically', async () => {
+        Model.get.mockResolvedValue(stored({ type: SessionType.MAKE_UP }));
+        Students.get.mockResolvedValue(
+          pat({ name: undefined, make_up_batches: [], make_up_minutes: 0 }),
+        );
+        await expect(take({ status: 'Completed' })).rejects.toThrow(
+          'Not enough make-up minutes. The student has 0 min',
+        );
+      });
+
+      it('an admin and a lead on their own session may take it too', async () => {
+        await expect(
+          take({ status: 'Completed' }, admin),
+        ).resolves.toBeDefined();
+        Model.get.mockResolvedValue(stored({ tutor_id: 'c-lead' }));
+        await expect(
+          take({ status: 'Completed' }, lead),
+        ).resolves.toBeDefined();
+      });
+
+      it('a session without a student never loads one', async () => {
+        Model.get.mockResolvedValue(
+          stored({ type: SessionType.GROUP, student_id: undefined }),
+        );
+        const res = await take({ status: 'Completed' });
+        expect(Students.get).not.toHaveBeenCalled();
+        expect(res.makeup).toEqual({
+          before: 0,
+          after: 0,
+          delta: 0,
+          unrecovered: 0,
+        });
+      });
+
+      it('a session with no stored status counts as pending', async () => {
+        Model.get.mockResolvedValue(
+          stored({ status: undefined as unknown as string }),
+        );
+        await take({ status: 'Completed' });
+        expect(Model.update.mock.calls[0][1].attendance_history[0].from).toBe(
+          'Pending',
+        );
+        await expect(take({ status: 'Pending' })).rejects.toThrow(
+          'The session is already Pending.',
+        );
+      });
+    });
+
+    describe('who may not', () => {
+      it('another tutor, a lead on a team member session, or a stranger', async () => {
+        for (const user of [
+          { ...tutor, contact: 'c-other' },
+          lead,
+          { ...tutor, groups: [] },
+          { ...tutor, groups: undefined as unknown as string[] },
+          { ...tutor, contact: '' },
+        ]) {
+          await expect(take({ status: 'Completed' }, user)).rejects.toThrow(
+            'Unauthorized',
+          );
+        }
+        expect(Model.update).not.toHaveBeenCalled();
+        expect(Students.get).not.toHaveBeenCalled();
+      });
+
+      it('the tutor, once attendance was taken', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow(
+          'Attendance is final. Ask an admin to correct it.',
+        );
+        await expect(
+          take({ status: 'Pending', reason: 'please' }),
+        ).rejects.toThrow('Attendance is final. Ask an admin to correct it.');
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('validation', () => {
+      it.each([[undefined], [''], ['Done'], ['completed'], [5]])(
+        'rejects the status %p',
+        async (status) => {
+          await expect(take({ status })).rejects.toThrow(
+            'status must be one of: Pending, Completed, Cancelled, NCNS.',
+          );
+          expect(Model.get).not.toHaveBeenCalled();
+        },
+      );
+
+      it('rejects a missing request', async () => {
+        await expect(
+          service.setAttendance('session-1', undefined as never, tutor),
+        ).rejects.toThrow('status must be one of');
+      });
+
+      it('404s on a session that does not exist', async () => {
+        Model.get.mockResolvedValue(undefined);
+        await expect(take({ status: 'Completed' })).rejects.toThrow(
+          NotFoundException,
+        );
+      });
+
+      it('rejects the status the session already has', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        await expect(
+          take({ status: 'Completed', reason: 'x' }, admin),
+        ).rejects.toThrow('The session is already Completed.');
+      });
+
+      it('rejects when the student cannot be loaded', async () => {
+        Students.get.mockRejectedValue(new Error('down'));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow('down');
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('admin correction', () => {
+      const banked = () =>
+        pat({
+          make_up_minutes: 180,
+          make_up_batches: [
+            { minutes: 120, earned_date: '2026-09-01T14:00:00.000Z' },
+            { minutes: 60, earned_date: START },
+          ],
+        });
+
+      it.each([[undefined], [''], ['   ']])(
+        'needs a reason (%p)',
+        async (reason) => {
+          Model.get.mockResolvedValue(stored({ status: 'Cancelled' }));
+          await expect(
+            take({ status: 'Completed', reason }, admin),
+          ).rejects.toThrow(
+            'A reason is required to change attendance that was already taken.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+          expect(Students.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('Cancelled → Completed takes the banked minutes back and records why', async () => {
+        Model.get.mockResolvedValue(
+          stored({
+            status: 'Cancelled',
+            attendance_history: [
+              {
+                from: 'Pending',
+                to: 'Cancelled',
+                by: 'c-tutor',
+                at: '2026-09-21T15:05:00.000Z',
+              },
+              null as never,
+            ],
+          }),
+        );
+        Students.get.mockResolvedValue(banked());
+        Contacts.get.mockResolvedValue({ first_name: 'Abby' });
+        const res = await take(
+          { status: 'Completed', reason: '  Marked the wrong session  ' },
+          admin,
+        );
+        expect(Students.update).toHaveBeenCalledWith(
+          { id: 'student-1' },
+          {
+            make_up_minutes: 120,
+            make_up_batches: [
+              { minutes: 120, earned_date: '2026-09-01T14:00:00.000Z' },
+            ],
+          },
+        );
+        expect(Model.update.mock.calls[0][1].attendance_history).toEqual([
+          {
+            from: 'Pending',
+            to: 'Cancelled',
+            by: 'c-tutor',
+            at: '2026-09-21T15:05:00.000Z',
+          },
+          {
+            from: 'Cancelled',
+            to: 'Completed',
+            by: 'c-admin',
+            by_name: 'Abby',
+            at: NOW.toISOString(),
+            reason: 'Marked the wrong session',
+            minutes_delta: -60,
+          },
+        ]);
+        expect(res.makeup).toEqual({
+          before: 180,
+          after: 120,
+          delta: -60,
+          unrecovered: 0,
+        });
+      });
+
+      it('records minutes that could not be taken back', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Cancelled' }));
+        Students.get.mockResolvedValue(
+          pat({
+            make_up_batches: [
+              { minutes: 25, earned_date: '2026-09-01T14:00:00.000Z' },
+            ],
+          }),
+        );
+        const res = await take({ status: 'Completed', reason: 'fix' }, admin);
+        expect(res.makeup).toEqual({
+          before: 25,
+          after: 0,
+          delta: -25,
+          unrecovered: 35,
+        });
+        expect(Model.update.mock.calls[0][1].attendance_history[0]).toEqual(
+          expect.objectContaining({ minutes_delta: -25, unrecovered: 35 }),
+        );
+      });
+
+      it('a make-up correction with too few minutes goes through and reports the shortfall', async () => {
+        Model.get.mockResolvedValue(
+          stored({ type: SessionType.MAKE_UP, status: 'Cancelled' }),
+        );
+        Students.get.mockResolvedValue(
+          pat({ make_up_batches: [{ minutes: 20, earned_date: START }] }),
+        );
+        const res = await take({ status: 'Completed', reason: 'fix' }, admin);
+        expect(res.makeup.unrecovered).toBe(40);
+        expect(Model.update).toHaveBeenCalled();
+      });
+
+      it('an admin may reopen a session to Pending', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Cancelled' }));
+        Students.get.mockResolvedValue(banked());
+        const res = await take(
+          { status: 'Pending', reason: 'wrong day' },
+          admin,
+        );
+        expect(res.session.status).toBe('Pending');
+        expect(res.makeup.delta).toBe(-60);
+      });
+
+      it('Completed ↔ NCNS moves no minutes and writes no student', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        await take({ status: 'NCNS', reason: 'no show' }, admin);
+        expect(Students.update).not.toHaveBeenCalled();
+        expect(Model.update.mock.calls[0][1].attendance_history[0]).toEqual(
+          expect.objectContaining({ minutes_delta: 0 }),
+        );
+      });
+
+      it('tolerates an unknown admin name', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        Contacts.get.mockRejectedValue(new Error('down'));
+        await take({ status: 'NCNS', reason: 'x' }, admin);
+        expect(
+          'by_name' in Model.update.mock.calls[0][1].attendance_history[0],
+        ).toBe(false);
+        Contacts.get.mockResolvedValue(undefined);
+        await take({ status: 'NCNS', reason: 'x' }, admin);
+        expect(
+          'by_name' in Model.update.mock.calls[1][1].attendance_history[0],
+        ).toBe(false);
+        Contacts.get.mockResolvedValue({ last_name: 'Reed' });
+        await take({ status: 'NCNS', reason: 'x' }, admin);
+        expect(
+          Model.update.mock.calls[2][1].attendance_history[0].by_name,
+        ).toBe('Reed');
+      });
+    });
+
+    describe('dry run', () => {
+      it('returns the plan and writes nothing', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        const res = await take(
+          { status: 'Cancelled', reason: 'preview', notes: 'n' },
+          admin,
+          true,
+        );
+        expect(res).toEqual({
+          session: { ...stored({ status: 'Cancelled' }), notes: 'n' },
+          makeup: { before: 120, after: 180, delta: 60, unrecovered: 0 },
+          dry_run: true,
+        });
+        expect(Model.update).not.toHaveBeenCalled();
+        expect(Students.update).not.toHaveBeenCalled();
+        expect(Contacts.get).not.toHaveBeenCalled();
+      });
+
+      it('keeps the stored notes when none are sent', async () => {
+        Model.get.mockResolvedValue(stored({ notes: 'kept' }));
+        const res = await take({ status: 'Completed' }, tutor, true);
+        expect(res.session.notes).toBe('kept');
+        const typed = await take(
+          { status: 'Completed', notes: 5 },
+          tutor,
+          true,
+        );
+        expect(typed.session.notes).toBe('kept');
+      });
+
+      it('still enforces the role and the reason', async () => {
+        Model.get.mockResolvedValue(stored({ status: 'Completed' }));
+        await expect(
+          take({ status: 'Cancelled' }, tutor, true),
+        ).rejects.toThrow('Attendance is final');
+        await expect(
+          take({ status: 'Cancelled' }, admin, true),
+        ).rejects.toThrow('A reason is required');
+      });
+    });
+
+    describe('failures', () => {
+      it('a failed student write stops before the session is touched', async () => {
+        Students.update.mockRejectedValue(new Error('student boom'));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow(
+          'student boom',
+        );
+        expect(Model.update).not.toHaveBeenCalled();
+      });
+
+      it('a failed session write puts the minutes back', async () => {
+        Model.update.mockRejectedValue(new Error('session boom'));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow(
+          'session boom',
+        );
+        expect(Students.update).toHaveBeenCalledTimes(2);
+        expect(Students.update).toHaveBeenLastCalledWith(
+          { id: 'student-1' },
+          {
+            make_up_minutes: 120,
+            make_up_batches: [
+              { minutes: 120, earned_date: '2026-09-01T14:00:00.000Z' },
+            ],
+          },
+        );
+      });
+
+      it('restores a student who had no batches by removing the list', async () => {
+        Students.get.mockResolvedValue(
+          pat({ make_up_minutes: undefined, make_up_batches: [null] }),
+        );
+        Model.update.mockRejectedValue(new Error('session boom'));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow(
+          'session boom',
+        );
+        expect(Students.update).toHaveBeenLastCalledWith(
+          { id: 'student-1' },
+          { $SET: { make_up_minutes: 0 }, $REMOVE: ['make_up_batches'] },
+        );
+      });
+
+      it('still reports the session failure when the restore fails too', async () => {
+        Model.update.mockRejectedValue(new Error('session boom'));
+        Students.update
+          .mockResolvedValueOnce({})
+          .mockRejectedValueOnce(new Error('restore boom'));
+        await expect(take({ status: 'Cancelled' })).rejects.toThrow(
+          'session boom',
+        );
+      });
+
+      it('restores nothing when no minutes moved', async () => {
+        Model.update.mockRejectedValue(new Error('session boom'));
+        await expect(take({ status: 'Completed' })).rejects.toThrow(
+          'session boom',
+        );
+        expect(Students.update).not.toHaveBeenCalled();
+      });
+    });
+
+    it('defaults to the current time and a real write', async () => {
+      const res = await service.setAttendance(
+        'session-1',
+        { status: 'Completed' },
+        tutor,
+      );
+      expect(res.dry_run).toBe(false);
+      expect(Model.update).toHaveBeenCalled();
+    });
+  });
 });

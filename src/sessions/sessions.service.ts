@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -9,11 +10,44 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { SessionsModel } from '../models/sessions.model';
 import { StudentsModel } from '../models/students.model';
 import { ContactsModel } from '../models/contacts.model';
-import { Session } from '../models/session.model';
+import { AttendanceChange, Session } from '../models/session.model';
+import { User } from '../models/user.model';
+import { isTutorLike } from '../models/user-groups';
+import {
+  ATTENDANCE_FINAL_MESSAGE,
+  AttendancePlan,
+  attendanceEffect,
+  isFinalized,
+  planAttendanceChange,
+  SESSION_STATUS,
+  SESSION_STATUSES,
+  sessionMinutes,
+} from './attendance';
 import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
 import { brandedEmail } from '../notifications/email-template';
+
+/** PUT /sessions/:id/attendance payload. */
+export class AttendanceRequest {
+  status: string;
+  /** Saved with the status when present (notes taken with attendance). */
+  notes?: string;
+  /** Required when an admin corrects attendance that was already taken. */
+  reason?: string;
+}
+
+export interface AttendanceResult {
+  session: Session;
+  makeup: {
+    before: number;
+    after: number;
+    delta: number;
+    unrecovered: number;
+  };
+  /** True when nothing was written (the confirmation preview). */
+  dry_run: boolean;
+}
 
 /** Optional start_datetime range (ISO strings; ISO sorts lexically). */
 export interface SessionRange {
@@ -363,6 +397,193 @@ export class SessionsService {
         Logger.error(err.message, err);
         return Promise.reject(err);
       });
+  }
+
+  /**
+   * Takes or corrects attendance — the ONE place a session's status changes
+   * once it exists. The role is checked against the stored session, the
+   * student's make-up minutes are corrected here (never in the browser),
+   * and the change is recorded on the session.
+   *
+   * - Pending → anything: an admin, or the session's own tutor.
+   * - Finalized → anything: an admin only, with a reason.
+   */
+  async setAttendance(
+    id: string,
+    request: AttendanceRequest,
+    user: User,
+    options: { dryRun?: boolean; now?: Date } = {},
+  ): Promise<AttendanceResult> {
+    const now = options.now ?? new Date();
+    const status = request?.status;
+    if (!status || !SESSION_STATUSES.includes(status)) {
+      throw new BadRequestException(
+        `status must be one of: ${SESSION_STATUSES.join(', ')}.`,
+      );
+    }
+    const stored = await this.getSessionById(id);
+    if (!stored) {
+      throw new NotFoundException('Session not found.');
+    }
+    const groups = user.groups ?? [];
+    const isAdmin = groups.includes('Admins');
+    const ownsSession =
+      isTutorLike(groups) && !!user.contact && stored.tutor_id === user.contact;
+    if (!isAdmin && !ownsSession) {
+      Logger.error('Invalid credentials for taking attendance');
+      throw new ForbiddenException('Unauthorized');
+    }
+    const correcting = isFinalized(stored.status);
+    if (correcting && !isAdmin) {
+      throw new ForbiddenException(ATTENDANCE_FINAL_MESSAGE);
+    }
+    if ((stored.status ?? SESSION_STATUS.PENDING) === status) {
+      throw new BadRequestException(`The session is already ${status}.`);
+    }
+    const reason = (request.reason ?? '').trim();
+    if (correcting && !reason) {
+      throw new BadRequestException(
+        'A reason is required to change attendance that was already taken.',
+      );
+    }
+
+    const student = stored.student_id
+      ? ((await StudentsModel.get(stored.student_id).catch((err: Error) => {
+          Logger.error(err.message, err);
+          return Promise.reject(err);
+        })) as unknown as Student | undefined)
+      : undefined;
+    const plan = planAttendanceChange(
+      { ...stored },
+      status,
+      student ? ({ ...student } as Student) : undefined,
+      now,
+    );
+    // Taking attendance on a make-up the student has no minutes for is
+    // refused; a CORRECTION goes through and reports the shortfall.
+    if (
+      !correcting &&
+      plan.unrecovered > 0 &&
+      attendanceEffect(stored.type, status) === 'consume'
+    ) {
+      throw new BadRequestException(
+        `Not enough make-up minutes. ${student?.name ?? 'The student'} has ${plan.before} min but this session requires ${sessionMinutes(stored)} min.`,
+      );
+    }
+
+    const notes = typeof request.notes === 'string' ? request.notes : undefined;
+    const makeup = {
+      before: plan.before,
+      after: plan.after,
+      delta: plan.delta,
+      unrecovered: plan.unrecovered,
+    };
+    if (options.dryRun) {
+      return {
+        session: {
+          ...stored,
+          status,
+          ...(notes !== undefined ? { notes } : {}),
+        },
+        makeup,
+        dry_run: true,
+      };
+    }
+
+    const change: AttendanceChange = {
+      from: stored.status ?? SESSION_STATUS.PENDING,
+      to: status,
+      by: user.contact ?? '',
+      at: now.toISOString(),
+      minutes_delta: plan.delta,
+    };
+    const byName = await this.displayNameOf(user);
+    if (byName) change.by_name = byName;
+    if (reason) change.reason = reason;
+    if (plan.unrecovered > 0) change.unrecovered = plan.unrecovered;
+    const history = [
+      ...(stored.attendance_history ?? []).filter(
+        (h) => !!h && typeof h === 'object',
+      ),
+      change,
+    ];
+
+    if (plan.student && student) {
+      await this.writeLedger(student.id!, plan);
+    }
+    const attributes: Record<string, unknown> = {
+      status,
+      attendance_history: history,
+    };
+    if (notes !== undefined) attributes.notes = notes;
+    const updated = await SessionsModel.update({ id }, attributes).catch(
+      async (err: Error) => {
+        Logger.error(err.message, err);
+        // The minutes moved but the status did not: put the ledger back.
+        if (plan.student && student) {
+          await this.restoreLedger(student).catch((restoreErr: Error) => {
+            Logger.error(
+              `Could not restore the make-up ledger of ${student.id}: ${restoreErr.message}`,
+              restoreErr,
+            );
+          });
+        }
+        return Promise.reject(err);
+      },
+    );
+    return {
+      session: updated as unknown as Session,
+      makeup,
+      dry_run: false,
+    };
+  }
+
+  /** Writes the planned ledger onto the student (the two make-up fields only). */
+  private async writeLedger(
+    studentId: string,
+    plan: AttendancePlan,
+  ): Promise<void> {
+    const batches = plan.student!.make_up_batches ?? [];
+    const sets: Record<string, unknown> = {
+      make_up_minutes: plan.student!.make_up_minutes ?? 0,
+    };
+    const update =
+      batches.length > 0
+        ? { ...sets, make_up_batches: batches }
+        : { $SET: sets, $REMOVE: ['make_up_batches'] };
+    await StudentsModel.update({ id: studentId }, update).catch(
+      (err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      },
+    );
+  }
+
+  /** Puts a student's make-up fields back as they were loaded. */
+  private async restoreLedger(student: Student): Promise<void> {
+    const batches = (student.make_up_batches ?? []).filter(
+      (b) => !!b && typeof b === 'object',
+    );
+    const sets: Record<string, unknown> = {
+      make_up_minutes: student.make_up_minutes ?? 0,
+    };
+    await StudentsModel.update(
+      { id: student.id },
+      batches.length > 0
+        ? { ...sets, make_up_batches: batches }
+        : { $SET: sets, $REMOVE: ['make_up_batches'] },
+    );
+  }
+
+  /** The caller's name for the attendance record (blank when unknown). */
+  private async displayNameOf(user: User): Promise<string> {
+    if (!user.contact) return '';
+    const contact = (await ContactsModel.get(user.contact).catch(
+      () => undefined,
+    )) as unknown as Contact | undefined;
+    return contact
+      ? `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim()
+      : '';
   }
 
   async deleteSession(id: string) {
