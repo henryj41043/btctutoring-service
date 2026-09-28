@@ -56,6 +56,7 @@ describe('SessionsController', () => {
     const serviceMock: Partial<jest.Mocked<SessionsService>> = {
       getSessions: jest.fn(),
       getSessionById: jest.fn(),
+      setAttendance: jest.fn(),
       emailSessionNotes: jest.fn(),
       getSessionsByTutor: jest.fn(),
       getSessionsByTutors: jest.fn(),
@@ -430,13 +431,159 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
-    it('admin updates any session without an ownership lookup', async () => {
+    it('admin updates any session, whoever it belongs to', async () => {
+      service.getSessionById.mockResolvedValue(
+        session({ tutor_id: 'other@example.com' }),
+      );
       await controller.updateSession(
         reqAs(admin),
         session({ tutor_id: 'other@example.com' }),
       );
       expect(service.updateSession).toHaveBeenCalled();
-      expect(service.getSessionById).not.toHaveBeenCalled();
+    });
+
+    it('admin updates a session that is not stored yet, or has no id', async () => {
+      service.getSessionById.mockResolvedValue(undefined);
+      await controller.updateSession(reqAs(admin), session());
+      await controller.updateSession(reqAs(admin), session({ id: undefined }));
+      expect(service.updateSession).toHaveBeenCalledTimes(2);
+      expect(service.getSessionById).toHaveBeenCalledTimes(1);
+    });
+
+    describe('attendance lock', () => {
+      const final = (over: Partial<Session> = {}): Session =>
+        session({ status: 'Completed', notes: 'old', ...over });
+      const LOCKED = 'Attendance is final. Ask an admin to correct it.';
+
+      it('a tutor may still edit the notes of a finalized session', async () => {
+        service.getSessionById.mockResolvedValue(final());
+        await controller.updateSession(
+          reqAs(tutor),
+          final({ notes: 'corrected a typo' }),
+        );
+        expect(service.updateSession).toHaveBeenCalledWith(
+          final({ notes: 'corrected a typo' }),
+        );
+      });
+
+      it('an equivalent timestamp is not a change', async () => {
+        service.getSessionById.mockResolvedValue(final());
+        await controller.updateSession(
+          reqAs(tutor),
+          final({
+            start_datetime: '2026-01-01T10:00:00.000Z',
+            end_datetime: '2026-01-01T11:00:00.000Z',
+          }),
+        );
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+
+      it.each([
+        ['status', { status: 'Cancelled' }],
+        ['status back to Pending', { status: 'Pending' }],
+        ['type', { type: SessionType.MAKE_UP }],
+        ['start time', { start_datetime: '2026-01-01T09:00:00Z' }],
+        ['end time', { end_datetime: '2026-01-01T12:00:00Z' }],
+        ['student', { student_id: 'student-2' }],
+        ['roster', { participants: [{ id: 'p-1', name: 'Pat' }] }],
+      ])(
+        'a tutor cannot change the %s of a finalized session',
+        async (_n, over) => {
+          service.getSessionById.mockResolvedValue(final());
+          await expect(
+            controller.updateSession(reqAs(tutor), final(over)),
+          ).rejects.toThrow(LOCKED);
+          expect(service.updateSession).not.toHaveBeenCalled();
+        },
+      );
+
+      it('a lead is locked on their own finalized session like any tutor', async () => {
+        service.getSessionById.mockResolvedValue(final({ tutor_id: 'c-lead' }));
+        await expect(
+          controller.updateSession(
+            reqAs(lead),
+            final({ tutor_id: 'c-lead', status: 'Cancelled' }),
+          ),
+        ).rejects.toThrow(LOCKED);
+      });
+
+      it('an admin may change everything but the status', async () => {
+        service.getSessionById.mockResolvedValue(final());
+        await controller.updateSession(
+          reqAs(admin),
+          final({
+            type: SessionType.MAKE_UP,
+            start_datetime: '2026-01-01T09:00:00Z',
+            student_id: 'student-2',
+            tutor_id: 'c-other',
+          }),
+        );
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+
+      it('nobody changes a finalized status through the ordinary update', async () => {
+        service.getSessionById.mockResolvedValue(final());
+        await expect(
+          controller.updateSession(
+            reqAs(admin),
+            final({ status: 'Cancelled' }),
+          ),
+        ).rejects.toThrow(
+          'Attendance was already taken: change it with PUT /sessions/:id/attendance.',
+        );
+        expect(service.updateSession).not.toHaveBeenCalled();
+      });
+
+      it('a pending session is not locked: old app builds still take attendance here', async () => {
+        service.getSessionById.mockResolvedValue(session());
+        await controller.updateSession(
+          reqAs(tutor),
+          session({
+            status: 'Completed',
+            start_datetime: '2026-01-01T09:00:00Z',
+          }),
+        );
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+
+      it('a session with no stored status counts as pending', async () => {
+        service.getSessionById.mockResolvedValue(
+          session({ status: undefined as unknown as string }),
+        );
+        await controller.updateSession(
+          reqAs(tutor),
+          session({ status: 'Completed' }),
+        );
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+    });
+
+    describe('setAttendance', () => {
+      it('hands the request, the caller and the dry-run flag to the service', async () => {
+        const result = { dry_run: false } as never;
+        service.setAttendance.mockResolvedValue(result);
+        const body = { status: 'Completed', notes: 'n' };
+        expect(await controller.setAttendance(reqAs(tutor), 's-1', body)).toBe(
+          result,
+        );
+        expect(service.setAttendance).toHaveBeenCalledWith('s-1', body, tutor, {
+          dryRun: false,
+        });
+        await controller.setAttendance(reqAs(admin), 's-1', body, 'true');
+        expect(service.setAttendance).toHaveBeenLastCalledWith(
+          's-1',
+          body,
+          admin,
+          { dryRun: true },
+        );
+        await controller.setAttendance(reqAs(admin), 's-1', body, 'yes');
+        expect(service.setAttendance).toHaveBeenLastCalledWith(
+          's-1',
+          body,
+          admin,
+          { dryRun: false },
+        );
+      });
     });
 
     it('owning tutor updates their own stored session', async () => {

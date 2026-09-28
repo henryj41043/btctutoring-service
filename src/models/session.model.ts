@@ -18,6 +18,22 @@ export class SessionParticipant {
   name: string;
 }
 
+/** One attendance change on a session (who, when, why, and the minutes moved). */
+export class AttendanceChange {
+  from: string;
+  to: string;
+  /** The contact id of whoever made the change. */
+  by: string;
+  by_name?: string;
+  at: string;
+  /** Required when an admin corrects attendance that was already taken. */
+  reason?: string;
+  /** The change in the student's available make-up minutes. */
+  minutes_delta?: number;
+  /** Minutes that should have been taken back but were already gone. */
+  unrecovered?: number;
+}
+
 export class Session {
   id?: string;
   type: SessionType;
@@ -34,4 +50,6 @@ export class Session {
   notes_emailed_at?: string;
   /** GROUP sessions only: the student roster (student_id stays empty). */
   participants?: SessionParticipant[];
+  /** Every attendance change, oldest first (written by setAttendance only). */
+  attendance_history?: AttendanceChange[];
 }
