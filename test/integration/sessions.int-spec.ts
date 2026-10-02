@@ -115,6 +115,33 @@ describe('Sessions (integration)', () => {
     expect(Model).not.toHaveBeenCalled();
   });
 
+  it('a tutor cannot change the type of their own session; an admin can', async () => {
+    Model.get.mockResolvedValue({
+      id: 's-1',
+      tutor_id: 'contact-tutor',
+      type: 'MAKE_UP',
+      status: 'Pending',
+    });
+    Model.update.mockResolvedValue({ id: 's-1' });
+    const change = { id: 's-1', tutor_id: 'contact-tutor', type: 'ADMIN' };
+    const asTutor = await request(server())
+      .put('/sessions')
+      .set('x-test-role', 'tutor')
+      .send(change);
+    expect(asTutor.status).toBe(403);
+    expect(asTutor.body.message).toBe(
+      'Only an admin can change the session type.',
+    );
+    expect(Model.update).not.toHaveBeenCalled();
+
+    const asAdmin = await request(server())
+      .put('/sessions')
+      .set('x-test-role', 'admin')
+      .send(change);
+    expect(asAdmin.status).toBe(200);
+    expect(Model.update).toHaveBeenCalledTimes(1);
+  });
+
   it('a tutor may update their own stored session but not others', async () => {
     Model.get.mockResolvedValue({ id: 's-1', tutor_id: 'contact-tutor' });
     Model.update.mockResolvedValue({ id: 's-1' });
