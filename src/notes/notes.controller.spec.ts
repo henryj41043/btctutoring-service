@@ -90,10 +90,11 @@ describe('NotesController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
-    it('a tutor reads the notes on their own contact record', async () => {
-      service.getNotesByRecipient.mockResolvedValue([] as never);
-      await controller.getNotes(reqAs(tutor), '', '', 'c-tutor');
-      expect(service.getNotesByRecipient).toHaveBeenCalledWith('c-tutor');
+    it('a tutor cannot read the notes on their own contact record', async () => {
+      await expect(
+        controller.getNotes(reqAs(tutor), '', '', 'c-tutor'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getNotesByRecipient).not.toHaveBeenCalled();
     });
 
     it("a tutor cannot read another contact's notes", async () => {
@@ -103,10 +104,11 @@ describe('NotesController', () => {
       expect(service.getNotesByRecipient).not.toHaveBeenCalled();
     });
 
-    it('a lead tutor reads the notes on their own contact record', async () => {
-      service.getNotesByRecipient.mockResolvedValue([] as never);
-      await controller.getNotes(reqAs(lead), '', '', 'c-lead');
-      expect(service.getNotesByRecipient).toHaveBeenCalledWith('c-lead');
+    it('a lead tutor cannot read the notes on their own contact record', async () => {
+      await expect(
+        controller.getNotes(reqAs(lead), '', '', 'c-lead'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getNotesByRecipient).not.toHaveBeenCalled();
     });
 
     it("a lead tutor cannot read another contact's notes", async () => {

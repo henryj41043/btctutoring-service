@@ -237,6 +237,14 @@ describe('Students & Notes (integration, admin-only)', () => {
       expect(res.status).toBe(403);
     });
 
+    it('a tutor cannot read the notes on their own contact record', async () => {
+      const res = await request(server())
+        .get('/notes?recipient=contact-tutor')
+        .set('x-test-role', 'tutor');
+      expect(res.status).toBe(403);
+      expect(NoteModel.scan).not.toHaveBeenCalled();
+    });
+
     it('admin creates a note', async () => {
       NoteModel.__save.mockResolvedValue(undefined);
       const res = await request(server())

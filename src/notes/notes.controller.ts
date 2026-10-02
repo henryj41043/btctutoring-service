@@ -17,7 +17,6 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Note } from '../models/note.model';
-import { isTutorLike } from '../models/user-groups';
 
 @Controller('notes')
 export class NotesController {
@@ -32,17 +31,9 @@ export class NotesController {
     @Query('recipient') recipientId: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const groups: string[] = user.groups ?? [];
-    const isAdmin: boolean = groups.includes('Admins');
-    // Tutors may read the notes on their own contact record.
-    if (
-      !isAdmin &&
-      isTutorLike(groups) &&
-      recipientId &&
-      recipientId === user.contact
-    ) {
-      return this.notesService.getNotesByRecipient(recipientId);
-    }
+    // Notes are admin-only on every route: a tutor may not read even the
+    // notes on their own contact record (client 2026-10-02).
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       if (id) {
         return this.notesService.getNote(id);
