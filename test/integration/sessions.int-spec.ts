@@ -89,6 +89,32 @@ describe('Sessions (integration)', () => {
     expect(res.body.message).toBe('Session created successfully.');
   });
 
+  it('only an admin creates a custom trial', async () => {
+    Model.__save.mockResolvedValue(undefined);
+    const custom = {
+      type: 'CUSTOM_TRIAL',
+      tutor_id: 'contact-tutor',
+      student_id: 'st-1',
+      status: 'Pending',
+    };
+    const asAdmin = await request(server())
+      .post('/sessions')
+      .set('x-test-role', 'admin')
+      .send(custom);
+    expect(asAdmin.status).toBe(201);
+    expect(Model).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'CUSTOM_TRIAL', student_id: 'st-1' }),
+    );
+
+    Model.mockClear();
+    const asTutor = await request(server())
+      .post('/sessions')
+      .set('x-test-role', 'tutor')
+      .send(custom);
+    expect(asTutor.status).toBe(403);
+    expect(Model).not.toHaveBeenCalled();
+  });
+
   it('a tutor may update their own stored session but not others', async () => {
     Model.get.mockResolvedValue({ id: 's-1', tutor_id: 'contact-tutor' });
     Model.update.mockResolvedValue({ id: 's-1' });
@@ -237,6 +263,18 @@ describe('Sessions (integration)', () => {
           make_up_batches: [{ minutes: 60, earned_date: START }],
         },
       );
+    });
+
+    it('cancelling a custom trial banks no make-up minutes', async () => {
+      Model.get.mockResolvedValue(stored({ type: 'CUSTOM_TRIAL' }));
+      const res = await request(server())
+        .put('/sessions/s-1/attendance')
+        .set('x-test-role', 'tutor')
+        .send({ status: 'Cancelled', notes: 'Family cancelled' });
+      expect(res.status).toBe(200);
+      expect(res.body.session.status).toBe('Cancelled');
+      expect(res.body.makeup).toMatchObject({ delta: 0, unrecovered: 0 });
+      expect(StudentModel.update).not.toHaveBeenCalled();
     });
 
     it('a tutor cannot change attendance that was already taken', async () => {

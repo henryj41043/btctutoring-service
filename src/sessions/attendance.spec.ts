@@ -76,6 +76,9 @@ describe('attendance rules', () => {
     [SessionType.MAKE_UP, 'Pending', null],
     [SessionType.TRIAL, 'Cancelled', null],
     [SessionType.TRIAL, 'Completed', null],
+    [SessionType.CUSTOM_TRIAL, 'Cancelled', null],
+    [SessionType.CUSTOM_TRIAL, 'Completed', null],
+    [SessionType.CUSTOM_TRIAL, 'NCNS', null],
     [SessionType.GROUP, 'Cancelled', null],
     [SessionType.GROUP, 'Completed', null],
     [SessionType.ADMIN, 'Cancelled', null],
@@ -170,14 +173,16 @@ describe('attendance rules', () => {
         );
       });
 
-      it.each([SessionType.TRIAL, SessionType.GROUP, SessionType.ADMIN])(
-        'a %s session never moves minutes',
-        (type) => {
-          for (const to of ['Completed', 'Cancelled', 'NCNS']) {
-            expect(plan({ type }, to).delta).toBe(0);
-          }
-        },
-      );
+      it.each([
+        SessionType.TRIAL,
+        SessionType.CUSTOM_TRIAL,
+        SessionType.GROUP,
+        SessionType.ADMIN,
+      ])('a %s session never moves minutes', (type) => {
+        for (const to of ['Completed', 'Cancelled', 'NCNS']) {
+          expect(plan({ type }, to).delta).toBe(0);
+        }
+      });
     });
 
     describe('correcting attendance', () => {

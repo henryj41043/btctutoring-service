@@ -336,6 +336,28 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
+    it('admin creates a custom trial', async () => {
+      const custom = session({ type: SessionType.CUSTOM_TRIAL });
+      await controller.createSession(reqAs(admin), custom);
+      expect(service.createSession).toHaveBeenCalledWith(custom);
+    });
+
+    it.each([
+      ['tutor', () => tutor, 'c-tutor'],
+      ['lead tutor', () => lead, 'c-lead'],
+    ])(
+      'a %s cannot create a custom trial, even for themselves',
+      async (_who, user, contact) => {
+        await expect(
+          controller.createSession(
+            reqAs(user()),
+            session({ type: SessionType.CUSTOM_TRIAL, tutor_id: contact }),
+          ),
+        ).rejects.toThrow('Unauthorized');
+        expect(service.createSession).not.toHaveBeenCalled();
+      },
+    );
+
     it('tutor creates their OWN make-up session', async () => {
       await controller.createSession(
         reqAs(tutor),

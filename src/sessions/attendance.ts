@@ -35,7 +35,8 @@ export type AttendanceEffect = 'bank' | 'consume' | null;
 /**
  * What a status does to the student's make-up minutes: a cancelled tutoring
  * session BANKS its length; a make-up that was held (or a no-show) CONSUMES
- * its length. Trials, BTC & Me and admin sessions never touch the bank.
+ * its length. Trials, custom trials, BTC & Me and admin sessions never touch
+ * the bank: a custom trial is not billed, so there is nothing to make up.
  */
 export function attendanceEffect(
   type: SessionType | string | undefined,

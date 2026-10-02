@@ -38,13 +38,14 @@ export class NotificationsService {
       return;
     }
 
-    // Filter: TUTORING/TRIAL/GROUP type, Pending status, ended before start of
-    // today — trials and group sessions left Pending need attendance just like
-    // a lesson (group payroll pays only Completed/NCNS sessions).
+    // Filter: TUTORING/TRIAL/CUSTOM_TRIAL/GROUP type, Pending status, ended
+    // before start of today — trials and group sessions left Pending need
+    // attendance just like a lesson (payroll pays only Completed/NCNS ones).
     const staleSessions = allSessions.filter(
       (s) =>
         (s.type === SessionType.TUTORING ||
           s.type === SessionType.TRIAL ||
+          s.type === SessionType.CUSTOM_TRIAL ||
           s.type === SessionType.GROUP) &&
         s.status === 'Pending' &&
         s.end_datetime &&
