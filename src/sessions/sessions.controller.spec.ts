@@ -402,6 +402,88 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
+    describe('session type', () => {
+      const pending = (over: Partial<Session> = {}) =>
+        session({ tutor_id: 'c-tutor', ...over });
+
+      it.each([
+        SessionType.ADMIN,
+        SessionType.MAKE_UP,
+        SessionType.TRIAL,
+        SessionType.CUSTOM_TRIAL,
+        SessionType.GROUP,
+      ])(
+        'a tutor cannot turn their own pending tutoring session into %s',
+        async (type) => {
+          service.getSessionById.mockResolvedValue(pending());
+          await expect(
+            controller.updateSession(reqAs(tutor), pending({ type })),
+          ).rejects.toThrow('Only an admin can change the session type.');
+          expect(service.updateSession).not.toHaveBeenCalled();
+        },
+      );
+
+      it('a tutor cannot turn their own make-up into a tutoring session', async () => {
+        service.getSessionById.mockResolvedValue(
+          pending({ type: SessionType.MAKE_UP }),
+        );
+        await expect(
+          controller.updateSession(
+            reqAs(tutor),
+            pending({ type: SessionType.TUTORING }),
+          ),
+        ).rejects.toThrow('Only an admin can change the session type.');
+      });
+
+      it('a lead tutor is held to the same rule', async () => {
+        service.getSessionById.mockResolvedValue(
+          pending({ tutor_id: 'c-lead' }),
+        );
+        await expect(
+          controller.updateSession(
+            reqAs(lead),
+            pending({ tutor_id: 'c-lead', type: SessionType.ADMIN }),
+          ),
+        ).rejects.toThrow('Only an admin can change the session type.');
+      });
+
+      it('a tutor still updates a session whose type is unchanged or left out', async () => {
+        service.getSessionById.mockResolvedValue(pending());
+        await controller.updateSession(reqAs(tutor), pending({ notes: 'x' }));
+        await controller.updateSession(
+          reqAs(tutor),
+          pending({ type: undefined, notes: 'y' }),
+        );
+        expect(service.updateSession).toHaveBeenCalledTimes(2);
+      });
+
+      it('a session stored without a type counts as tutoring', async () => {
+        service.getSessionById.mockResolvedValue(pending({ type: undefined }));
+        await controller.updateSession(
+          reqAs(tutor),
+          pending({ type: SessionType.TUTORING }),
+        );
+        expect(service.updateSession).toHaveBeenCalledTimes(1);
+        await expect(
+          controller.updateSession(
+            reqAs(tutor),
+            pending({ type: SessionType.ADMIN }),
+          ),
+        ).rejects.toThrow('Only an admin can change the session type.');
+      });
+
+      it('an admin may change the type', async () => {
+        service.getSessionById.mockResolvedValue(pending());
+        await controller.updateSession(
+          reqAs(admin),
+          pending({ type: SessionType.CUSTOM_TRIAL }),
+        );
+        expect(service.updateSession).toHaveBeenCalledWith(
+          expect.objectContaining({ type: SessionType.CUSTOM_TRIAL }),
+        );
+      });
+    });
+
     it('admin emails session notes without an ownership lookup', async () => {
       service.emailSessionNotes.mockResolvedValue({ id: 's-1' } as never);
       await controller.emailSessionNotes(reqAs(admin), 's-1');

@@ -31,6 +31,9 @@ import { User } from '../models/user.model';
 import { Session, SessionType } from '../models/session.model';
 import { isLeadTutor, isTutorLike } from '../models/user-groups';
 
+export const SESSION_TYPE_LOCKED_MESSAGE =
+  'Only an admin can change the session type.';
+
 @Controller('sessions')
 export class SessionsController {
   constructor(
@@ -194,6 +197,20 @@ export class SessionsController {
         );
         throw new ForbiddenException(ATTENDANCE_FINAL_MESSAGE);
       }
+    }
+    // The type decides how a session is paid and whether a cancellation
+    // banks make-up minutes, so only an admin may change it. Sessions stored
+    // before types existed count as tutoring, as they do everywhere else.
+    if (
+      !isAdmin &&
+      stored &&
+      session.type !== undefined &&
+      session.type !== (stored.type ?? SessionType.TUTORING)
+    ) {
+      Logger.error(
+        `Session ${session.id}: refused a type change by a non-admin`,
+      );
+      throw new ForbiddenException(SESSION_TYPE_LOCKED_MESSAGE);
     }
     return this.sessionsService.updateSession(session);
   }
