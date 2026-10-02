@@ -63,7 +63,10 @@ export class ServiceEndService {
     return result;
   }
 
-  /** Deletes the student's PENDING tutoring sessions after the end date. */
+  /**
+   * Deletes the student's PENDING tutoring sessions and custom trials after
+   * the end date (make-ups and group sessions are handled elsewhere).
+   */
   private async deleteSessionsAfter(
     studentId: string,
     end: string,
@@ -74,7 +77,8 @@ export class ServiceEndService {
     const doomed = after.filter(
       (s) =>
         !!s.id &&
-        s.type === SessionType.TUTORING &&
+        (s.type === SessionType.TUTORING ||
+          s.type === SessionType.CUSTOM_TRIAL) &&
         s.status === PENDING_STATUS,
     );
     for (const session of doomed) {

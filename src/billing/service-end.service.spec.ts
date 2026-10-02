@@ -122,7 +122,7 @@ describe('ServiceEndService', () => {
     expect(res).toEqual({ studentsEnded: 0, sessionsDeleted: 0 });
   });
 
-  it('removes only pending tutoring sessions after the end date', async () => {
+  it('removes only pending tutoring sessions and custom trials after the end date', async () => {
     students.getStudents.mockResolvedValue([
       student({ service_end_date: '2026-10-15' }),
     ]);
@@ -133,6 +133,13 @@ describe('ServiceEndService', () => {
       session({ id: 'cancelled', status: 'Cancelled' }),
       session({ id: 'makeup', type: 'MAKE_UP' as never }),
       session({ id: 'group', type: 'GROUP' as never }),
+      session({ id: 'trial', type: 'TRIAL' as never }),
+      session({ id: 'custom', type: 'CUSTOM_TRIAL' as never }),
+      session({
+        id: 'custom-held',
+        type: 'CUSTOM_TRIAL' as never,
+        status: 'Completed',
+      }),
       session({ id: undefined }),
     ]);
     const res = await service.applyServiceEnds(now);
@@ -142,10 +149,11 @@ describe('ServiceEndService', () => {
     expect(sessions.deleteSession.mock.calls.map((c) => c[0])).toEqual([
       'a',
       'b',
+      'custom',
     ]);
     // A future end date cleans up but leaves the student Active.
     expect(students.applyServiceEnd).not.toHaveBeenCalled();
-    expect(res).toEqual({ studentsEnded: 0, sessionsDeleted: 2 });
+    expect(res).toEqual({ studentsEnded: 0, sessionsDeleted: 3 });
   });
 
   it('cleans up for a student who already left Active too', async () => {
