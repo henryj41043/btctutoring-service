@@ -1,3 +1,4 @@
+import { studentVisibleToTutor } from './student-visibility';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { FirstWeekSession, Student } from '../models/student.model';
 import { StudentsModel } from '../models/students.model';
@@ -423,10 +424,7 @@ export class StudentsService {
    * Public: the controller also uses it to scope a tutor's make-up write.
    */
   isVisibleToTutor(student: Student, tutorId: string): boolean {
-    return (
-      student.assigned_tutor_id === tutorId ||
-      (student.schedule ?? []).some((slot) => slot?.tutor_id === tutorId)
-    );
+    return studentVisibleToTutor(student, tutorId);
   }
 
   async getStudentsByTutor(tutorId: string) {

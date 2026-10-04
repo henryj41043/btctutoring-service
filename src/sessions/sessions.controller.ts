@@ -16,6 +16,7 @@ import {
 import {
   AttendanceRequest,
   AttendanceResult,
+  ScheduledMakeup,
   SessionsService,
   SessionRange,
 } from './sessions.service';
@@ -105,6 +106,28 @@ export class SessionsController {
       }
     }
     Logger.error('Invalid parameters for given user credentials');
+    throw new ForbiddenException('Unauthorized');
+  }
+
+  /**
+   * Scheduled (pending) make-up minutes per student. An admin gets every
+   * student; a tutor or lead tutor gets their own students, counted across
+   * all tutors, so the number left to schedule is right whoever booked them.
+   */
+  @Get('makeup-scheduled')
+  @UseGuards(AuthGuard('jwt'))
+  async getScheduledMakeup(
+    @Request() req: express.Request,
+  ): Promise<ScheduledMakeup[]> {
+    const user: User = req.user as User;
+    const groups: string[] = user.groups ?? [];
+    if (groups.includes('Admins')) {
+      return this.sessionsService.getScheduledMakeupMinutes();
+    }
+    if (isTutorLike(groups) && user.contact) {
+      return this.sessionsService.getScheduledMakeupMinutes(user.contact);
+    }
+    Logger.error('User not authorized to read scheduled make-up minutes');
     throw new ForbiddenException('Unauthorized');
   }
 
