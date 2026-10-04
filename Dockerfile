@@ -2,8 +2,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Dependencies first: this layer is reused until package*.json changes.
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
 RUN npm run build
 
