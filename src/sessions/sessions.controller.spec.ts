@@ -63,6 +63,7 @@ describe('SessionsController', () => {
       getSessionsByStudent: jest.fn(),
       getAllSessions: jest.fn(),
       getSessionsBySeries: jest.fn(),
+      getScheduledMakeupMinutes: jest.fn(),
       createSession: jest.fn(),
       createSessions: jest.fn(),
       updateSession: jest.fn(),
@@ -85,6 +86,45 @@ describe('SessionsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('getScheduledMakeup', () => {
+    const totals = [{ student_id: 's-1', scheduled_minutes: 45 }];
+
+    it('an admin gets every student', async () => {
+      service.getScheduledMakeupMinutes.mockResolvedValue(totals);
+      await expect(controller.getScheduledMakeup(reqAs(admin))).resolves.toBe(
+        totals,
+      );
+      expect(service.getScheduledMakeupMinutes).toHaveBeenCalledWith();
+    });
+
+    it.each([
+      ['tutor', () => tutor, 'c-tutor'],
+      ['lead tutor', () => lead, 'c-lead'],
+    ])('a %s gets their own students only', async (_who, user, contact) => {
+      service.getScheduledMakeupMinutes.mockResolvedValue(totals);
+      await expect(controller.getScheduledMakeup(reqAs(user()))).resolves.toBe(
+        totals,
+      );
+      expect(service.getScheduledMakeupMinutes).toHaveBeenCalledWith(contact);
+    });
+
+    it('a tutor without a contact id is refused rather than given everything', async () => {
+      await expect(
+        controller.getScheduledMakeup(
+          reqAs({ ...tutor, contact: '' as never }),
+        ),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getScheduledMakeupMinutes).not.toHaveBeenCalled();
+    });
+
+    it('anyone else is refused', async () => {
+      await expect(
+        controller.getScheduledMakeup(reqAs(stranger)),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getScheduledMakeupMinutes).not.toHaveBeenCalled();
+    });
   });
 
   describe('getSessions routing', () => {

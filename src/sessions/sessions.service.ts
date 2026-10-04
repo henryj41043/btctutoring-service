@@ -10,7 +10,12 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { SessionsModel } from '../models/sessions.model';
 import { StudentsModel } from '../models/students.model';
 import { ContactsModel } from '../models/contacts.model';
-import { AttendanceChange, Session } from '../models/session.model';
+import {
+  AttendanceChange,
+  Session,
+  SessionType,
+} from '../models/session.model';
+import { studentVisibleToTutor } from '../students/student-visibility';
 import { User } from '../models/user.model';
 import { isTutorLike } from '../models/user-groups';
 import {
@@ -35,6 +40,12 @@ export class AttendanceRequest {
   notes?: string;
   /** Required when an admin corrects attendance that was already taken. */
   reason?: string;
+}
+
+/** One student's make-up minutes that are scheduled but not yet held. */
+export interface ScheduledMakeup {
+  student_id: string;
+  scheduled_minutes: number;
 }
 
 export interface AttendanceResult {
@@ -278,6 +289,63 @@ export class SessionsService {
         Logger.error(err.message, err);
         return Promise.reject(err);
       });
+  }
+
+  /**
+   * Make-up minutes that are already scheduled: every PENDING make-up, summed
+   * per student across ALL tutors. A scheduled make-up does not leave the
+   * student's balance until attendance is taken, so this is what tells
+   * "available" from "still left to schedule". With `tutorId` the result is
+   * limited to the students that tutor can see (assigned or slot tutor).
+   */
+  async getScheduledMakeupMinutes(
+    tutorId?: string,
+  ): Promise<ScheduledMakeup[]> {
+    const sessions = (await SessionsModel.scan({
+      type: { eq: SessionType.MAKE_UP },
+      status: { eq: SESSION_STATUS.PENDING },
+    })
+      .all()
+      .exec()
+      .catch((err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      })) as unknown as Session[];
+    const totals = new Map<string, number>();
+    for (const session of sessions) {
+      if (!session.student_id) continue;
+      totals.set(
+        session.student_id,
+        (totals.get(session.student_id) ?? 0) + sessionMinutes(session),
+      );
+    }
+    let visible: Set<string> | null = null;
+    if (tutorId) {
+      const students = (await StudentsModel.scan()
+        .all()
+        .exec()
+        .catch((err: Error) => {
+          Logger.error(err.message, err);
+          return Promise.reject(err);
+        })) as unknown as Student[];
+      visible = new Set(
+        students
+          .filter(
+            (student) =>
+              !!student.id && studentVisibleToTutor(student, tutorId),
+          )
+          .map((student) => student.id as string),
+      );
+    }
+    return [...totals.entries()]
+      .filter(
+        ([studentId, minutes]) =>
+          minutes > 0 && (visible?.has(studentId) ?? true),
+      )
+      .map(([student_id, scheduled_minutes]) => ({
+        student_id,
+        scheduled_minutes,
+      }));
   }
 
   async getSessionsBySeries(seriesId: string) {

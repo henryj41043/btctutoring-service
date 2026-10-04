@@ -54,6 +54,87 @@ describe('SessionsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('getScheduledMakeupMinutes', () => {
+    const makeup = (over: Partial<Session> = {}): Session =>
+      sampleSession({ type: SessionType.MAKE_UP, ...over });
+
+    it('sums pending make-up minutes per student across every tutor', async () => {
+      scanResolves(Model, [
+        makeup({ student_id: 'a', tutor_id: 't-1' }), // 60
+        makeup({
+          student_id: 'a',
+          tutor_id: 't-2',
+          start_datetime: '2026-01-02T10:00:00Z',
+          end_datetime: '2026-01-02T10:15:00Z',
+        }), // 15
+        makeup({
+          student_id: 'b',
+          start_datetime: '2026-01-03T10:00:00Z',
+          end_datetime: '2026-01-03T10:30:00Z',
+        }), // 30
+        makeup({ student_id: undefined }), // nobody to count it for
+        makeup({ student_id: 'c', end_datetime: 'not a date' }), // 0 minutes
+      ]);
+      await expect(service.getScheduledMakeupMinutes()).resolves.toEqual([
+        { student_id: 'a', scheduled_minutes: 75 },
+        { student_id: 'b', scheduled_minutes: 30 },
+      ]);
+      expect(Model.scan).toHaveBeenCalledWith({
+        type: { eq: 'MAKE_UP' },
+        status: { eq: 'Pending' },
+      });
+      // An admin read needs no student lookup.
+      expect(Students.scan).not.toHaveBeenCalled();
+    });
+
+    it('limits a tutor to the students they can see, still counting other tutors', async () => {
+      Model.scan.mockReturnValueOnce({
+        all: () => ({
+          exec: () =>
+            Promise.resolve([
+              makeup({ student_id: 'mine', tutor_id: 'someone-else' }),
+              makeup({ student_id: 'slot', tutor_id: 't-1' }),
+              makeup({ student_id: 'theirs', tutor_id: 't-1' }),
+            ]),
+        }),
+      });
+      scanResolves(Students, [
+        { id: 'mine', assigned_tutor_id: 't-1' },
+        {
+          id: 'slot',
+          assigned_tutor_id: 't-9',
+          schedule: [{ tutor_id: 't-1' }],
+        },
+        { id: 'theirs', assigned_tutor_id: 't-9', schedule: [null] },
+        { assigned_tutor_id: 't-1' },
+      ]);
+      await expect(service.getScheduledMakeupMinutes('t-1')).resolves.toEqual([
+        { student_id: 'mine', scheduled_minutes: 60 },
+        { student_id: 'slot', scheduled_minutes: 60 },
+      ]);
+      expect(Students.scan).toHaveBeenCalledTimes(1);
+    });
+
+    it('is empty when nothing is scheduled', async () => {
+      scanResolves(Model, []);
+      await expect(service.getScheduledMakeupMinutes()).resolves.toEqual([]);
+    });
+
+    it('rejects when the sessions or the students cannot be read', async () => {
+      scanRejects(Model, new Error('sessions boom'));
+      await expect(service.getScheduledMakeupMinutes()).rejects.toThrow(
+        'sessions boom',
+      );
+      scanResolves(Model, [makeup()]);
+      Students.scan.mockReturnValueOnce({
+        all: () => ({ exec: () => Promise.reject(new Error('students boom')) }),
+      });
+      await expect(service.getScheduledMakeupMinutes('t-1')).rejects.toThrow(
+        'students boom',
+      );
+    });
+  });
+
   describe('read queries', () => {
     it('getSessions scans by tutor and student', async () => {
       const sessions = [sampleSession()];

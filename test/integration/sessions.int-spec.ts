@@ -89,6 +89,52 @@ describe('Sessions (integration)', () => {
     expect(res.body.message).toBe('Session created successfully.');
   });
 
+  it('scheduled make-up minutes: an admin gets all, a tutor only their students, a stranger nothing', async () => {
+    const pending = [
+      {
+        type: 'MAKE_UP',
+        status: 'Pending',
+        student_id: 'st-1',
+        start_datetime: '2026-10-10T14:00:00.000Z',
+        end_datetime: '2026-10-10T14:30:00.000Z',
+      },
+      {
+        type: 'MAKE_UP',
+        status: 'Pending',
+        student_id: 'st-2',
+        start_datetime: '2026-10-11T14:00:00.000Z',
+        end_datetime: '2026-10-11T15:00:00.000Z',
+      },
+    ];
+    scanResolves(Model, pending);
+    const asAdmin = await request(server())
+      .get('/sessions/makeup-scheduled')
+      .set('x-test-role', 'admin');
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body).toEqual([
+      { student_id: 'st-1', scheduled_minutes: 30 },
+      { student_id: 'st-2', scheduled_minutes: 60 },
+    ]);
+
+    scanResolves(Model, pending);
+    scanResolves(StudentModel, [
+      { id: 'st-1', assigned_tutor_id: 'contact-tutor' },
+      { id: 'st-2', assigned_tutor_id: 'someone-else' },
+    ]);
+    const asTutor = await request(server())
+      .get('/sessions/makeup-scheduled')
+      .set('x-test-role', 'tutor');
+    expect(asTutor.status).toBe(200);
+    expect(asTutor.body).toEqual([
+      { student_id: 'st-1', scheduled_minutes: 30 },
+    ]);
+
+    const asStranger = await request(server())
+      .get('/sessions/makeup-scheduled')
+      .set('x-test-role', 'none');
+    expect(asStranger.status).toBe(403);
+  });
+
   it('only an admin creates a custom trial', async () => {
     Model.__save.mockResolvedValue(undefined);
     const custom = {
