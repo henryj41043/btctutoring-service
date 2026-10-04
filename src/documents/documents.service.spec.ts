@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   DeleteObjectCommand,
+  GetObjectTaggingCommand,
   HeadObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -22,6 +23,11 @@ import { DocumentsModel } from '../models/documents.model';
 import { ContactsModel } from '../models/contacts.model';
 import { ContactDocument } from '../models/contact-document.model';
 import { ModelMock, scanResolves } from '../../test/model-mock';
+import {
+  INFECTED_MESSAGE,
+  SCANNING_MESSAGE,
+  UNSCANNED_MESSAGE,
+} from './scan-status';
 
 jest.mock('../models/documents.model', () => ({
   DocumentsModel: require('../../test/model-mock').makeModelMock(),
@@ -305,7 +311,7 @@ describe('DocumentsService', () => {
       });
       expect(Model.update).toHaveBeenCalledWith(
         { id: 'd-1' },
-        { status: 'ready' },
+        { status: 'ready', scan_status: 'scanning' },
       );
     });
 
@@ -409,6 +415,177 @@ describe('DocumentsService', () => {
       await expect(service.getDocumentUrl('d-1', 'view')).rejects.toThrow(
         InternalServerErrorException,
       );
+    });
+  });
+
+  describe('malware scan', () => {
+    const scanning = (over: Partial<ContactDocument> = {}) =>
+      doc({
+        scan_status: 'scanning',
+        uploaded_at: '2026-09-28T11:59:00.000Z',
+        ...over,
+      });
+    const tagged = (value?: string) =>
+      s3.on(GetObjectTaggingCommand).resolves({
+        TagSet: [
+          { Key: 'other', Value: 'NO_THREATS_FOUND' },
+          ...(value === undefined
+            ? []
+            : [{ Key: 'GuardDutyMalwareScanStatus', Value: value }]),
+        ],
+      });
+    const tagReads = () =>
+      s3
+        .commandCalls(GetObjectTaggingCommand)
+        .map((call) => call.args[0].input);
+
+    it('opens a document the scan found clean, and records the verdict', async () => {
+      Model.get.mockResolvedValue(scanning());
+      tagged('NO_THREATS_FOUND');
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).resolves.toEqual(
+        { url: 'https://signed' },
+      );
+      expect(tagReads()).toEqual([
+        { Bucket: 'docs-bucket', Key: 'documents/c-1/d-1' },
+      ]);
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'd-1' },
+        { scan_status: 'clean' },
+      );
+      expect(deletedKeys()).toEqual([]);
+    });
+
+    it.each([
+      ['clean', doc({ scan_status: 'clean' })],
+      ['stored before scanning existed', doc()],
+    ])(
+      'opens a document that is %s without asking storage',
+      async (_w, row) => {
+        Model.get.mockResolvedValue(row);
+        await expect(service.getDocumentUrl('d-1', 'view')).resolves.toEqual({
+          url: 'https://signed',
+        });
+        expect(tagReads()).toEqual([]);
+        expect(Model.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('removes an infected file, keeps its row marked and refuses to open it', async () => {
+      const warn = jest.spyOn(Logger, 'warn').mockImplementation();
+      Model.get.mockResolvedValue(scanning());
+      tagged('THREATS_FOUND');
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).rejects.toThrow(
+        new BadRequestException(INFECTED_MESSAGE),
+      );
+      expect(deletedKeys()).toEqual([
+        { Bucket: 'docs-bucket', Key: 'documents/c-1/d-1' },
+      ]);
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'd-1' },
+        { scan_status: 'infected' },
+      );
+      expect(Model.delete).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        'Document d-1 was blocked by the malware scan',
+      );
+      expect(signedUrl).not.toHaveBeenCalled();
+    });
+
+    it('refuses a file the scanner could not read, and records that', async () => {
+      Model.get.mockResolvedValue(scanning());
+      tagged('UNSUPPORTED');
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).rejects.toThrow(
+        new BadRequestException(UNSCANNED_MESSAGE),
+      );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'd-1' },
+        { scan_status: 'unscanned' },
+      );
+      expect(deletedKeys()).toEqual([]);
+    });
+
+    it.each([
+      ['a tag set without the scan tag', () => tagged()],
+      ['no tag set at all', () => s3.on(GetObjectTaggingCommand).resolves({})],
+    ])('asks to wait while the scan runs (%s)', async (_what, arrange) => {
+      Model.get.mockResolvedValue(scanning());
+      arrange();
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).rejects.toThrow(
+        new BadRequestException(SCANNING_MESSAGE),
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+      expect(signedUrl).not.toHaveBeenCalled();
+    });
+
+    it('gives up on a scan with no verdict after fifteen minutes, without recording it', async () => {
+      Model.get.mockResolvedValue(
+        scanning({ uploaded_at: '2026-09-28T11:44:00.000Z' }),
+      );
+      tagged();
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).rejects.toThrow(
+        new BadRequestException(UNSCANNED_MESSAGE),
+      );
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps the document closed when the verdict cannot be read', async () => {
+      const log = jest.spyOn(Logger, 'error').mockImplementation();
+      const failure = new Error('denied');
+      Model.get.mockResolvedValue(scanning());
+      s3.on(GetObjectTaggingCommand).rejects(failure);
+      await expect(service.getDocumentUrl('d-1', 'view', NOW)).rejects.toThrow(
+        new BadRequestException(SCANNING_MESSAGE),
+      );
+      expect(log).toHaveBeenCalledWith('Scan result of d-1 not read', failure);
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('uses the current time by default', async () => {
+      Model.get.mockResolvedValue(
+        scanning({ uploaded_at: '2020-01-01T00:00:00.000Z' }),
+      );
+      tagged();
+      await expect(service.getDocumentUrl('d-1', 'view')).rejects.toThrow(
+        new BadRequestException(UNSCANNED_MESSAGE),
+      );
+    });
+
+    it('brings the list up to date with the verdicts', async () => {
+      const waiting = scanning({ id: 'a', s3_key: 'documents/c-1/a' });
+      const legacy = doc({ id: 'b', uploaded_at: '2026-09-01T10:00:00.000Z' });
+      scanResolves(Model, [legacy, waiting]);
+      tagged('NO_THREATS_FOUND');
+      await expect(service.getDocumentsByContact('c-1', NOW)).resolves.toEqual([
+        { ...waiting, scan_status: 'clean' },
+        legacy,
+      ]);
+      expect(tagReads()).toEqual([
+        { Bucket: 'docs-bucket', Key: 'documents/c-1/a' },
+      ]);
+      expect(Model.update).toHaveBeenCalledTimes(1);
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'a' },
+        { scan_status: 'clean' },
+      );
+    });
+
+    it('lists settled documents without the bucket or storage', async () => {
+      delete process.env.DOCUMENTS_BUCKET;
+      const clean = doc({ scan_status: 'clean' });
+      scanResolves(Model, [clean]);
+      await expect(service.getDocumentsByContact('c-1', NOW)).resolves.toEqual([
+        clean,
+      ]);
+      expect(tagReads()).toEqual([]);
+    });
+
+    it('shows a timed-out scan as unscanned in the list', async () => {
+      const stuck = scanning({ uploaded_at: '2026-09-28T11:00:00.000Z' });
+      scanResolves(Model, [stuck]);
+      tagged();
+      await expect(service.getDocumentsByContact('c-1', NOW)).resolves.toEqual([
+        { ...stuck, scan_status: 'unscanned' },
+      ]);
     });
   });
 

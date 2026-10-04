@@ -15,6 +15,11 @@ export const DocumentsSchema = new dynamoose.Schema({
     type: String,
     enum: ['pending', 'ready'],
   },
+  // The malware scan's verdict. Absent on documents stored before scanning.
+  scan_status: {
+    type: String,
+    enum: ['scanning', 'clean', 'infected', 'unscanned'],
+  },
   uploaded_by: String,
   uploaded_at: String,
 });
