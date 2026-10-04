@@ -54,6 +54,313 @@ describe('SessionsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('createMakeupSet', () => {
+    const NOW = new Date('2026-10-05T12:00:00.000Z');
+    const adminUser = {
+      username: 'admin',
+      email: 'a@x',
+      groups: ['Admins'],
+      contact: 'c-admin',
+    };
+    const tutorUser = {
+      username: 't',
+      email: 't@x',
+      groups: ['Tutors'],
+      contact: 't-1',
+    };
+    const leadUser = { ...tutorUser, groups: ['LeadTutors'] };
+    const slot = (offset: number, minutes = 15) => {
+      const start = new Date(Date.UTC(2026, 9, 5 + offset, 14, 0, 0));
+      return {
+        start_datetime: start.toISOString(),
+        end_datetime: new Date(start.getTime() + minutes * 60000).toISOString(),
+      };
+    };
+    const request = (over: object = {}) => ({
+      student_id: 'student-1',
+      tutor_id: 't-1',
+      tutor_name: 'Tess',
+      notes: 'Extra time',
+      sessions: [slot(1), slot(8), slot(15)],
+      ...over,
+    });
+    const activeStudent = (over: object = {}) => ({
+      id: 'student-1',
+      name: 'Pat',
+      status: 'Active Student',
+      assigned_tutor_id: 't-1',
+      make_up_minutes: 30,
+      make_up_batches: [
+        { minutes: 30, earned_date: '2026-10-04T12:00:00.000Z' },
+      ],
+      ...over,
+    });
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      Students.get.mockResolvedValue(activeStudent());
+      scanResolves(Model, []);
+      Model.batchPut.mockResolvedValue(undefined);
+    });
+
+    it('creates the make-ups the minutes cover, under one series, and reports the rest', async () => {
+      const result = await service.createMakeupSet(request(), tutorUser, {
+        now: NOW,
+      });
+      expect(result).toMatchObject({
+        dry_run: false,
+        accepted: [0, 1],
+        skipped: [{ index: 2, reason: 'insufficient' }],
+        minutes_used: 30,
+        minutes_left: 0,
+        created: 2,
+      });
+      expect(result.ids).toHaveLength(2);
+      expect(result.series_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(Students.get).toHaveBeenCalledWith('student-1');
+      expect(Model.scan).toHaveBeenCalledWith({
+        student_id: { eq: 'student-1' },
+        type: { eq: 'MAKE_UP' },
+        status: { eq: 'Pending' },
+      });
+      const written = Model.batchPut.mock.calls[0][0];
+      expect(written).toHaveLength(2);
+      expect(written[0]).toMatchObject({
+        type: 'MAKE_UP',
+        status: 'Pending',
+        start_datetime: slot(1).start_datetime,
+        end_datetime: slot(1).end_datetime,
+        student_id: 'student-1',
+        student_name: 'Pat',
+        tutor_id: 't-1',
+        tutor_name: 'Tess',
+        notes: 'Extra time',
+        series_id: result.series_id,
+      });
+      expect(written[1].series_id).toBe(result.series_id);
+      expect(written[1].start_datetime).toBe(slot(8).start_datetime);
+    });
+
+    it('a dry run plans and writes nothing', async () => {
+      const result = await service.createMakeupSet(request(), tutorUser, {
+        dryRun: true,
+        now: NOW,
+      });
+      expect(result).toEqual({
+        accepted: [0, 1],
+        skipped: [{ index: 2, reason: 'insufficient' }],
+        minutes_used: 30,
+        minutes_left: 0,
+        dry_run: true,
+        created: 0,
+        ids: [],
+      });
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when no date fits', async () => {
+      Students.get.mockResolvedValue(
+        activeStudent({ make_up_minutes: 0, make_up_batches: [] }),
+      );
+      const result = await service.createMakeupSet(request(), tutorUser, {
+        now: NOW,
+      });
+      expect(result).toMatchObject({
+        dry_run: false,
+        accepted: [],
+        created: 0,
+        ids: [],
+      });
+      expect(result.series_id).toBeUndefined();
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('counts make-ups already scheduled with any tutor', async () => {
+      scanResolves(Model, [{ ...slot(3, 30), tutor_id: 'someone-else' }]);
+      const result = await service.createMakeupSet(request(), tutorUser, {
+        dryRun: true,
+        now: NOW,
+      });
+      expect(result.accepted).toEqual([]);
+    });
+
+    it('an admin creates a set for any tutor and any student; notes default to empty', async () => {
+      Students.get.mockResolvedValue(
+        activeStudent({ assigned_tutor_id: 'someone-else' }),
+      );
+      const result = await service.createMakeupSet(
+        request({ tutor_id: 't-9', notes: undefined }),
+        adminUser,
+        { now: NOW },
+      );
+      expect(result.created).toBe(2);
+      expect(Model.batchPut.mock.calls[0][0][0]).toMatchObject({
+        tutor_id: 't-9',
+        notes: '',
+      });
+    });
+
+    it('a lead tutor creates a set for themselves', async () => {
+      const result = await service.createMakeupSet(request(), leadUser, {
+        now: NOW,
+      });
+      expect(result.created).toBe(2);
+    });
+
+    it.each([
+      ['for another tutor', { tutor_id: 't-2' }, tutorUser],
+      [
+        'without being a tutor',
+        {},
+        { ...tutorUser, groups: undefined as unknown as string[] },
+      ],
+    ])('refuses a tutor creating a set %s', async (_what, over, user) => {
+      await expect(
+        service.createMakeupSet(request(over), user, { now: NOW }),
+      ).rejects.toThrow('Unauthorized');
+      expect(Students.get).not.toHaveBeenCalled();
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('refuses a tutor creating a set for a student who is not theirs', async () => {
+      Students.get.mockResolvedValue(
+        activeStudent({ assigned_tutor_id: 'someone-else' }),
+      );
+      await expect(
+        service.createMakeupSet(request(), tutorUser, { now: NOW }),
+      ).rejects.toThrow('Unauthorized');
+      expect(Model.scan).not.toHaveBeenCalled();
+    });
+
+    it('is a 404 for an unknown student', async () => {
+      Students.get.mockResolvedValue(undefined);
+      await expect(
+        service.createMakeupSet(request(), adminUser, { now: NOW }),
+      ).rejects.toThrow('Student not found');
+    });
+
+    it('refuses a student who is not active', async () => {
+      Students.get.mockResolvedValue(activeStudent({ status: 'Onboarding' }));
+      await expect(
+        service.createMakeupSet(request(), adminUser, { now: NOW }),
+      ).rejects.toThrow(
+        'Make-ups can only be scheduled for an active student.',
+      );
+    });
+
+    it.each([
+      ['no dates', { sessions: [] }, 'Choose at least one date.'],
+      ['a missing list', { sessions: undefined }, 'Choose at least one date.'],
+      [
+        'more than 60 dates',
+        { sessions: Array.from({ length: 61 }, (_, i) => slot(i + 1)) },
+        'A set can hold at most 60 make-ups.',
+      ],
+      ['no student', { student_id: '' }, 'A student and a tutor are required.'],
+      ['no tutor', { tutor_id: '' }, 'A student and a tutor are required.'],
+      [
+        'an unreadable date',
+        { sessions: [{ start_datetime: 'x', end_datetime: 'y' }] },
+        'Every make-up needs a start and a later end time.',
+      ],
+      [
+        'an end before the start',
+        {
+          sessions: [
+            {
+              start_datetime: slot(1).end_datetime,
+              end_datetime: slot(1).start_datetime,
+            },
+          ],
+        },
+        'Every make-up needs a start and a later end time.',
+      ],
+      [
+        'a start in the past',
+        { sessions: [slot(-1)] },
+        'A make-up cannot start in the past.',
+      ],
+      [
+        'a date beyond the look-ahead',
+        {
+          sessions: [
+            {
+              start_datetime: '2027-02-01T00:00:00.000Z',
+              end_datetime: '2027-02-01T00:15:00.000Z',
+            },
+          ],
+        },
+        'Make-ups can be scheduled up to 3 months ahead.',
+      ],
+    ])('refuses %s', async (_what, over, message) => {
+      await expect(
+        service.createMakeupSet(request(over) as never, adminUser, {
+          now: NOW,
+        }),
+      ).rejects.toThrow(message);
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('allows exactly 60 dates and the last moment of the look-ahead', async () => {
+      Students.get.mockResolvedValue(
+        activeStudent({
+          make_up_never_expire: true,
+          make_up_batches: [
+            { minutes: 6000, earned_date: '2026-10-04T12:00:00.000Z' },
+          ],
+        }),
+      );
+      const sessions = [
+        ...Array.from({ length: 59 }, (_, i) => slot(i + 1)),
+        {
+          start_datetime: '2027-01-31T23:45:00.000Z',
+          end_datetime: '2027-02-01T00:00:00.000Z',
+        },
+      ];
+      const result = await service.createMakeupSet(
+        request({ sessions }),
+        adminUser,
+        { dryRun: true, now: NOW },
+      );
+      expect(result.accepted).toHaveLength(60);
+    });
+
+    it('rejects when the student or the sessions cannot be read', async () => {
+      Students.get.mockRejectedValue(new Error('student boom'));
+      await expect(
+        service.createMakeupSet(request(), adminUser, { now: NOW }),
+      ).rejects.toThrow('student boom');
+      Students.get.mockResolvedValue(activeStudent());
+      scanRejects(Model, new Error('scan boom'));
+      await expect(
+        service.createMakeupSet(request(), adminUser, { now: NOW }),
+      ).rejects.toThrow('scan boom');
+    });
+
+    it('uses the current time and a real write by default', async () => {
+      const soon = new Date(Date.now() + 86400000);
+      Students.get.mockResolvedValue(
+        activeStudent({
+          make_up_batches: [
+            { minutes: 30, earned_date: new Date().toISOString() },
+          ],
+        }),
+      );
+      const result = await service.createMakeupSet(
+        request({
+          sessions: [
+            {
+              start_datetime: soon.toISOString(),
+              end_datetime: new Date(soon.getTime() + 900000).toISOString(),
+            },
+          ],
+        }),
+        adminUser,
+      );
+      expect(result).toMatchObject({ dry_run: false, created: 1 });
+    });
+  });
+
   describe('getScheduledMakeupMinutes', () => {
     const makeup = (over: Partial<Session> = {}): Session =>
       sampleSession({ type: SessionType.MAKE_UP, ...over });

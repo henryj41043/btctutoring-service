@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpCode,
   Logger,
   Param,
   Post,
@@ -16,6 +17,7 @@ import {
 import {
   AttendanceRequest,
   AttendanceResult,
+  MakeupSetResult,
   ScheduledMakeup,
   SessionsService,
   SessionRange,
@@ -29,6 +31,7 @@ import { TeamsService } from '../teams/teams.service';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
+import { MakeupSetDto } from './dto/makeup-set.dto';
 import { Session, SessionType } from '../models/session.model';
 import { isLeadTutor, isTutorLike } from '../models/user-groups';
 
@@ -70,6 +73,14 @@ export class SessionsController {
     if (series) {
       if (isAdmin) {
         return this.sessionsService.getSessionsBySeries(series);
+      }
+      // A tutor reads a series as far as it is theirs: enough to move
+      // "this and all future" make-ups of a set they are the tutor on.
+      if (tutorLike && user.contact) {
+        const sessions = (await this.sessionsService.getSessionsBySeries(
+          series,
+        )) as unknown as Session[];
+        return sessions.filter((s) => s.tutor_id === user.contact);
       }
     } else if (tutor && student) {
       if (isAdmin || (tutorLike && idMatchesTutor)) {
@@ -156,6 +167,24 @@ export class SessionsController {
     }
     Logger.error('Creating new session is restricted to admins');
     throw new ForbiddenException('Unauthorized');
+  }
+
+  /**
+   * Plans or creates a set of make-ups for one student (see
+   * SessionsService.createMakeupSet). With `?dry_run=true` nothing is
+   * written: the result is the preview shown before saving.
+   */
+  @Post('makeup-set')
+  @HttpCode(200)
+  @UseGuards(AuthGuard('jwt'))
+  async createMakeupSet(
+    @Request() req: express.Request,
+    @Body() request: MakeupSetDto,
+    @Query('dry_run') dryRun?: string,
+  ): Promise<MakeupSetResult> {
+    return this.sessionsService.createMakeupSet(request, req.user as User, {
+      dryRun: dryRun === 'true',
+    });
   }
 
   @Post('batch')

@@ -16,6 +16,10 @@ import {
   SessionType,
 } from '../models/session.model';
 import { studentVisibleToTutor } from '../students/student-visibility';
+import { STUDENT_STATUS } from '../students/student-status';
+import { MakeupSetDto } from './dto/makeup-set.dto';
+import { MAKEUP_SET_MAX, MakeupSetPlan, planMakeupSet } from './makeup-set';
+import { HORIZON_MONTHS_AHEAD } from './session-builder';
 import { User } from '../models/user.model';
 import { isTutorLike } from '../models/user-groups';
 import {
@@ -40,6 +44,16 @@ export class AttendanceRequest {
   notes?: string;
   /** Required when an admin corrects attendance that was already taken. */
   reason?: string;
+}
+
+/** What POST /sessions/makeup-set answers: the plan, and what was created. */
+export interface MakeupSetResult extends MakeupSetPlan {
+  dry_run: boolean;
+  /** Make-ups written by this call (0 on a dry run). */
+  created: number;
+  ids: string[];
+  /** Shared by every make-up of the set; absent when nothing was created. */
+  series_id?: string;
 }
 
 /** One student's make-up minutes that are scheduled but not yet held. */
@@ -346,6 +360,124 @@ export class SessionsService {
         student_id,
         scheduled_minutes,
       }));
+  }
+
+  /**
+   * Plans, and unless `dryRun` creates, a set of make-ups for one student.
+   * The browser proposes the dates; the minutes decide which are scheduled
+   * (see planMakeupSet). An admin may create a set for any tutor; a tutor or
+   * lead tutor only for themselves and a student they can see.
+   */
+  async createMakeupSet(
+    request: MakeupSetDto,
+    user: User,
+    options: { dryRun?: boolean; now?: Date } = {},
+  ): Promise<MakeupSetResult> {
+    const now = options.now ?? new Date();
+    const dryRun = !!options.dryRun;
+    const groups = user.groups ?? [];
+    const isAdmin = groups.includes('Admins');
+    const candidates = request?.sessions;
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      throw new BadRequestException('Choose at least one date.');
+    }
+    if (candidates.length > MAKEUP_SET_MAX) {
+      throw new BadRequestException(
+        `A set can hold at most ${MAKEUP_SET_MAX} make-ups.`,
+      );
+    }
+    if (!request.student_id || !request.tutor_id) {
+      throw new BadRequestException('A student and a tutor are required.');
+    }
+    if (
+      !isAdmin &&
+      !(isTutorLike(groups) && request.tutor_id === user.contact)
+    ) {
+      Logger.error('Make-up set refused: not an admin and not their own');
+      throw new ForbiddenException('Unauthorized');
+    }
+    // The last moment a set may reach: the end of the look-ahead month.
+    const horizon = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + HORIZON_MONTHS_AHEAD + 1,
+      1,
+    );
+    for (const candidate of candidates) {
+      const start = Date.parse(candidate?.start_datetime);
+      const end = Date.parse(candidate?.end_datetime);
+      if (isNaN(start) || isNaN(end) || end <= start) {
+        throw new BadRequestException(
+          'Every make-up needs a start and a later end time.',
+        );
+      }
+      if (start < now.getTime()) {
+        throw new BadRequestException('A make-up cannot start in the past.');
+      }
+      if (start >= horizon) {
+        throw new BadRequestException(
+          `Make-ups can be scheduled up to ${HORIZON_MONTHS_AHEAD} months ahead.`,
+        );
+      }
+    }
+    const student = (await StudentsModel.get(request.student_id).catch(
+      (err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      },
+    )) as unknown as Student | undefined;
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+    if (!isAdmin && !studentVisibleToTutor(student, user.contact)) {
+      Logger.error('Make-up set refused: the student is not theirs');
+      throw new ForbiddenException('Unauthorized');
+    }
+    if (student.status !== STUDENT_STATUS.ACTIVE_STUDENT) {
+      throw new BadRequestException(
+        'Make-ups can only be scheduled for an active student.',
+      );
+    }
+    const pending = (await SessionsModel.scan({
+      student_id: { eq: request.student_id },
+      type: { eq: SessionType.MAKE_UP },
+      status: { eq: SESSION_STATUS.PENDING },
+    })
+      .all()
+      .exec()
+      .catch((err: Error) => {
+        Logger.error(err.message, err);
+        return Promise.reject(err);
+      })) as unknown as Session[];
+
+    const plan = planMakeupSet(student, pending, candidates, now);
+    if (dryRun || plan.accepted.length === 0) {
+      return { ...plan, dry_run: dryRun, created: 0, ids: [] };
+    }
+    const seriesId = randomUUID();
+    const created = await this.createSessions(
+      plan.accepted.map(
+        (index) =>
+          ({
+            type: SessionType.MAKE_UP,
+            status: SESSION_STATUS.PENDING,
+            start_datetime: candidates[index].start_datetime,
+            end_datetime: candidates[index].end_datetime,
+            student_id: student.id,
+            student_name: student.name,
+            tutor_id: request.tutor_id,
+            tutor_name: request.tutor_name,
+            notes: request.notes ?? '',
+            series_id: seriesId,
+          }) as unknown as Session,
+      ),
+    );
+    return {
+      ...plan,
+      dry_run: false,
+      created: created.count,
+      ids: created.ids,
+      series_id: seriesId,
+    };
   }
 
   async getSessionsBySeries(seriesId: string) {

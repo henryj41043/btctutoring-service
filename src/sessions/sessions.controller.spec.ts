@@ -64,6 +64,7 @@ describe('SessionsController', () => {
       getAllSessions: jest.fn(),
       getSessionsBySeries: jest.fn(),
       getScheduledMakeupMinutes: jest.fn(),
+      createMakeupSet: jest.fn(),
       createSession: jest.fn(),
       createSessions: jest.fn(),
       updateSession: jest.fn(),
@@ -86,6 +87,70 @@ describe('SessionsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('createMakeupSet', () => {
+    const body = { student_id: 's-1', tutor_id: 'c-tutor', sessions: [] };
+
+    it.each([
+      ['true', true],
+      ['false', false],
+      [undefined, false],
+      ['yes', false],
+    ])(
+      'hands the request and the caller to the service (dry_run=%s)',
+      async (flag, dryRun) => {
+        const result = { dry_run: dryRun } as never;
+        service.createMakeupSet.mockResolvedValue(result);
+        await expect(
+          controller.createMakeupSet(reqAs(tutor), body as never, flag),
+        ).resolves.toBe(result);
+        expect(service.createMakeupSet).toHaveBeenCalledWith(body, tutor, {
+          dryRun,
+        });
+      },
+    );
+  });
+
+  describe('series read for tutors', () => {
+    const mine = session({ id: 'a', tutor_id: 'c-tutor', series_id: 'set-1' });
+    const theirs = session({
+      id: 'b',
+      tutor_id: 'c-other',
+      series_id: 'set-1',
+    });
+
+    it('a tutor gets only their own sessions of a series', async () => {
+      service.getSessionsBySeries.mockResolvedValue([mine, theirs] as never);
+      await expect(
+        controller.getSessions(reqAs(tutor), '', '', 'set-1', '', ''),
+      ).resolves.toEqual([mine]);
+      expect(service.getSessionsBySeries).toHaveBeenCalledWith('set-1');
+    });
+
+    it('a lead tutor is held to the same rule', async () => {
+      service.getSessionsBySeries.mockResolvedValue([mine, theirs] as never);
+      await expect(
+        controller.getSessions(reqAs(lead), '', '', 'set-1', '', ''),
+      ).resolves.toEqual([]);
+    });
+
+    it('anyone else, or a tutor without a contact id, is refused', async () => {
+      await expect(
+        controller.getSessions(reqAs(stranger), '', '', 'set-1', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getSessions(
+          reqAs({ ...tutor, contact: '' as never }),
+          '',
+          '',
+          'set-1',
+          '',
+          '',
+        ),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getSessionsBySeries).not.toHaveBeenCalled();
+    });
   });
 
   describe('getScheduledMakeup', () => {
@@ -131,12 +196,6 @@ describe('SessionsController', () => {
     it('admin + series -> getSessionsBySeries', async () => {
       await controller.getSessions(reqAs(admin), '', '', 'series-1', '', '');
       expect(service.getSessionsBySeries).toHaveBeenCalledWith('series-1');
-    });
-
-    it('non-admin + series -> unauthorized', async () => {
-      await expect(
-        controller.getSessions(reqAs(tutor), '', '', 'series-1', '', ''),
-      ).rejects.toThrow('Unauthorized');
     });
 
     it('admin + tutor & student -> getSessions', async () => {
@@ -319,12 +378,9 @@ describe('SessionsController', () => {
       ).rejects.toThrow('Unauthorized');
     });
 
-    it('lead cannot fetch by student or series', async () => {
+    it('lead cannot fetch by student', async () => {
       await expect(
         controller.getSessions(reqAs(lead), '', 'stu-1', '', '', ''),
-      ).rejects.toThrow('Unauthorized');
-      await expect(
-        controller.getSessions(reqAs(lead), '', '', 'series-1', '', ''),
       ).rejects.toThrow('Unauthorized');
     });
 
