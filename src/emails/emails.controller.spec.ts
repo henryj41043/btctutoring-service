@@ -38,6 +38,7 @@ describe('EmailsController', () => {
     const serviceMock: Partial<jest.Mocked<EmailsService>> = {
       getEmailsByContact: jest.fn(),
       discardEmailsByContact: jest.fn(),
+      getRejectedEmails: jest.fn(),
       getUnmatchedEmails: jest.fn(),
       assignEmail: jest.fn(),
       discardEmail: jest.fn(),
@@ -99,6 +100,13 @@ describe('EmailsController', () => {
     });
   });
 
+  it('an admin lists the rejected forwards', async () => {
+    service.getRejectedEmails.mockResolvedValue([emailEntry]);
+    await expect(controller.getRejectedEmails(reqAs(admin))).resolves.toEqual([
+      emailEntry,
+    ]);
+  });
+
   it('an admin discards every email filed on a contact', async () => {
     service.discardEmailsByContact.mockResolvedValue({ discarded: 3 });
     await expect(
@@ -119,6 +127,10 @@ describe('EmailsController', () => {
         controller.discardEmailsByContact(reqAs(user), 'c-1'),
       ).rejects.toThrow(ForbiddenException);
       expect(service.discardEmailsByContact).not.toHaveBeenCalled();
+      await expect(controller.getRejectedEmails(reqAs(user))).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(service.getRejectedEmails).not.toHaveBeenCalled();
       await expect(controller.getUnmatchedEmails(reqAs(user))).rejects.toThrow(
         ForbiddenException,
       );

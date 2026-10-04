@@ -108,6 +108,40 @@ describe('Emails (integration)', () => {
     expect(Model.scan).not.toHaveBeenCalled();
   });
 
+  it('an admin lists rejected forwards and can still assign one; a tutor cannot list them', async () => {
+    const rejected = {
+      ...conversation,
+      id: 'r-thread-1',
+      status: 'rejected',
+      rejected_reason: 'unknown_sender',
+      contact_id: undefined,
+    };
+    scanResolves(Model, [rejected]);
+    const list = await request(server())
+      .get('/emails/rejected')
+      .set('x-test-role', 'admin');
+    expect(list.status).toBe(200);
+    expect(list.body[0].rejected_reason).toBe('unknown_sender');
+    expect(Model.scan).toHaveBeenCalledWith({ status: { eq: 'rejected' } });
+
+    Model.get.mockResolvedValue(rejected);
+    Model.update.mockResolvedValue({ ...rejected, status: 'matched' });
+    const assign = await request(server())
+      .post('/emails/r-thread-1/assign')
+      .set('x-test-role', 'admin')
+      .send({ contact_id: 'c-1' });
+    expect(assign.status).toBeLessThan(300);
+    expect(Model.update).toHaveBeenCalledWith(
+      { id: 'r-thread-1' },
+      expect.objectContaining({ contact_id: 'c-1', status: 'matched' }),
+    );
+
+    const denied = await request(server())
+      .get('/emails/rejected')
+      .set('x-test-role', 'tutor');
+    expect(denied.status).toBe(403);
+  });
+
   it('a tutor cannot read emails', async () => {
     const res = await request(server())
       .get('/emails/contact/c-1')
