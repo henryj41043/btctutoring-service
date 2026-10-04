@@ -6,6 +6,7 @@ describe('EmailsSchema', () => {
   it('declares the conversation fields the parser writes', () => {
     expect(EmailsSchema.attributes()).toEqual(
       expect.arrayContaining([
+        'rejected_reason',
         'is_thread',
         'message_count',
         'participants',

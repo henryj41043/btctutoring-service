@@ -68,6 +68,19 @@ export class EmailsController {
     }
   }
 
+  @Get('rejected')
+  @UseGuards(AuthGuard('jwt'))
+  async getRejectedEmails(@Request() req: express.Request): Promise<any> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.emailsService.getRejectedEmails();
+    } else {
+      Logger.error('User not authorized to get rejected emails');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Post(':id/assign')
   @UseGuards(AuthGuard('jwt'))
   async assignEmail(

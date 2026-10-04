@@ -222,6 +222,34 @@ describe('EmailsService', () => {
     });
   });
 
+  describe('getRejectedEmails', () => {
+    it('scans the refused forwards, newest first', async () => {
+      const older = entry({
+        id: 'r-old',
+        status: 'rejected',
+        rejected_reason: 'unknown_sender',
+        sent_at: '2026-08-01T10:00:00Z',
+      });
+      const newer = entry({
+        id: 'r-new',
+        status: 'rejected',
+        rejected_reason: 'spam',
+        sent_at: '2026-08-05T10:00:00Z',
+      });
+      scanResolves(Model, [older, newer]);
+      await expect(service.getRejectedEmails()).resolves.toEqual([
+        newer,
+        older,
+      ]);
+      expect(Model.scan).toHaveBeenCalledWith({ status: { eq: 'rejected' } });
+    });
+
+    it('rejects when the scan fails', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getRejectedEmails()).rejects.toThrow('scan boom');
+    });
+  });
+
   describe('discardEmailsByContact', () => {
     it('marks every email filed on the contact as discarded and keeps the rows', async () => {
       scanResolves(Model, [entry({ id: 'a' }), entry({ id: 'b' })]);

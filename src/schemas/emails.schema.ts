@@ -8,7 +8,7 @@ export const EmailsSchema = new dynamoose.Schema({
   },
   status: {
     type: String,
-    enum: ['matched', 'unmatched', 'discarded'],
+    enum: ['matched', 'unmatched', 'discarded', 'rejected'],
   },
   contact_id: String,
   from_email: String,
@@ -26,6 +26,8 @@ export const EmailsSchema = new dynamoose.Schema({
   assigned_by: String,
   assigned_at: String,
   created_at: String,
+  // Why the parser refused the forward (status 'rejected').
+  rejected_reason: String,
   // A forwarded conversation (several messages filed as one entry).
   is_thread: Boolean,
   message_count: Number,
