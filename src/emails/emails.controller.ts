@@ -3,6 +3,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
   Logger,
   Param,
   Post,
@@ -32,6 +33,24 @@ export class EmailsController {
       return this.emailsService.getEmailsByContact(contactId);
     } else {
       Logger.error('User not authorized to get contact emails');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
+  /** Removes every email filed on a contact (the contact is being deleted). */
+  @Post('contact/:contactId/discard')
+  @HttpCode(200)
+  @UseGuards(AuthGuard('jwt'))
+  async discardEmailsByContact(
+    @Request() req: express.Request,
+    @Param('contactId') contactId: string,
+  ): Promise<{ discarded: number }> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.emailsService.discardEmailsByContact(contactId);
+    } else {
+      Logger.error('User not authorized to discard contact emails');
       throw new ForbiddenException('Unauthorized');
     }
   }

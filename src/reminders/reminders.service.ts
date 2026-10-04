@@ -232,6 +232,33 @@ export class RemindersService {
       });
   }
 
+  /**
+   * Deletes every reminder linked to a contact (used when the contact itself
+   * is deleted: a reminder about someone who is gone has nothing to act on).
+   */
+  async deleteRemindersByContact(
+    contactId: string,
+  ): Promise<{ deleted: number }> {
+    const reminders = (await RemindersModel.scan({
+      contact_id: { eq: contactId },
+    })
+      .all()
+      .exec()
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      })) as unknown as Reminder[];
+    for (const reminder of reminders) {
+      await RemindersModel.delete({ id: reminder.id as string }).catch(
+        (error: Error) => {
+          Logger.error(error.message, error);
+          return Promise.reject(error);
+        },
+      );
+    }
+    return { deleted: reminders.length };
+  }
+
   async deleteReminder(id: string) {
     return RemindersModel.delete({
       id: id,

@@ -87,6 +87,27 @@ describe('Emails (integration)', () => {
     );
   });
 
+  it('an admin removes every email filed on a contact; a tutor cannot', async () => {
+    scanResolves(Model, [conversation, { ...conversation, id: 'thread-2' }]);
+    Model.update.mockResolvedValue({});
+    const res = await request(server())
+      .post('/emails/contact/c-1/discard')
+      .set('x-test-role', 'admin');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ discarded: 2 });
+    expect(Model.update).toHaveBeenCalledWith(
+      { id: 'thread-2' },
+      { status: 'discarded' },
+    );
+
+    jest.clearAllMocks();
+    const denied = await request(server())
+      .post('/emails/contact/c-1/discard')
+      .set('x-test-role', 'tutor');
+    expect(denied.status).toBe(403);
+    expect(Model.scan).not.toHaveBeenCalled();
+  });
+
   it('a tutor cannot read emails', async () => {
     const res = await request(server())
       .get('/emails/contact/c-1')

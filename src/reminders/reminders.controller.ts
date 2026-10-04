@@ -131,6 +131,23 @@ export class RemindersController {
     }
   }
 
+  /** Deletes every reminder linked to a contact (the contact is being deleted). */
+  @Delete('contact/:contactId')
+  @UseGuards(AuthGuard('jwt'))
+  async deleteRemindersByContact(
+    @Request() req: express.Request,
+    @Param('contactId') contactId: string,
+  ): Promise<{ deleted: number }> {
+    const user: User = req.user as User;
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    if (isAdmin) {
+      return this.remindersService.deleteRemindersByContact(contactId);
+    } else {
+      Logger.error('User not authorized to delete contact reminders');
+      throw new ForbiddenException('Unauthorized');
+    }
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'))
   async deleteReminder(

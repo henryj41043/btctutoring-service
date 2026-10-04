@@ -222,6 +222,46 @@ describe('EmailsService', () => {
     });
   });
 
+  describe('discardEmailsByContact', () => {
+    it('marks every email filed on the contact as discarded and keeps the rows', async () => {
+      scanResolves(Model, [entry({ id: 'a' }), entry({ id: 'b' })]);
+      Model.update.mockResolvedValue({});
+      await expect(service.discardEmailsByContact('c-1')).resolves.toEqual({
+        discarded: 2,
+      });
+      expect(Model.scan).toHaveBeenCalledWith({
+        contact_id: { eq: 'c-1' },
+        status: { eq: 'matched' },
+      });
+      expect(Model.update.mock.calls).toEqual([
+        [{ id: 'a' }, { status: 'discarded' }],
+        [{ id: 'b' }, { status: 'discarded' }],
+      ]);
+      expect(Model.delete).not.toHaveBeenCalled();
+    });
+
+    it('reports zero for a contact with no filed emails', async () => {
+      scanResolves(Model, []);
+      await expect(service.discardEmailsByContact('c-1')).resolves.toEqual({
+        discarded: 0,
+      });
+      expect(Model.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the emails cannot be read or updated', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.discardEmailsByContact('c-1')).rejects.toThrow(
+        'scan boom',
+      );
+      scanResolves(Model, [entry({ id: 'a' }), entry({ id: 'b' })]);
+      Model.update.mockRejectedValue(new Error('update boom'));
+      await expect(service.discardEmailsByContact('c-1')).rejects.toThrow(
+        'update boom',
+      );
+      expect(Model.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('discardEmail', () => {
     it('marks the row discarded but keeps it (dedup hash stays resident)', async () => {
       Model.get.mockResolvedValue(entry({ status: 'unmatched' }));

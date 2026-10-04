@@ -39,6 +39,7 @@ describe('RemindersController', () => {
       createReminder: jest.fn(),
       updateReminder: jest.fn(),
       deleteReminder: jest.fn(),
+      deleteRemindersByContact: jest.fn(),
       completeReminder: jest.fn(),
       uncompleteReminder: jest.fn(),
       ackReminder: jest.fn(),
@@ -74,6 +75,19 @@ describe('RemindersController', () => {
   it('admin can delete a reminder', async () => {
     await controller.deleteReminder(reqAs(admin), 'rem-1');
     expect(service.deleteReminder).toHaveBeenCalledWith('rem-1');
+  });
+
+  it('admin deletes every reminder linked to a contact; a tutor cannot', async () => {
+    service.deleteRemindersByContact.mockResolvedValue({ deleted: 2 });
+    await expect(
+      controller.deleteRemindersByContact(reqAs(admin), 'c-1'),
+    ).resolves.toEqual({ deleted: 2 });
+    expect(service.deleteRemindersByContact).toHaveBeenCalledWith('c-1');
+    service.deleteRemindersByContact.mockClear();
+    await expect(
+      controller.deleteRemindersByContact(reqAs(tutor), 'c-1'),
+    ).rejects.toThrow('Unauthorized');
+    expect(service.deleteRemindersByContact).not.toHaveBeenCalled();
   });
 
   it('admin can complete and reopen a reminder', async () => {

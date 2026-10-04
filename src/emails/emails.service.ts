@@ -32,6 +32,35 @@ export class EmailsService {
       });
   }
 
+  /**
+   * Removes every email filed on a contact (used when the contact itself is
+   * deleted). Same as the Remove button, for all of them: the rows stay as
+   * 'discarded', so the same emails are not filed again if re-forwarded.
+   */
+  async discardEmailsByContact(
+    contactId: string,
+  ): Promise<{ discarded: number }> {
+    const entries = (await EmailsModel.scan({
+      contact_id: { eq: contactId },
+      status: { eq: 'matched' },
+    })
+      .all()
+      .exec()
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      })) as unknown as EmailEntry[];
+    for (const entry of entries) {
+      await EmailsModel.update({ id: entry.id }, { status: 'discarded' }).catch(
+        (error: Error) => {
+          Logger.error(error.message, error);
+          return Promise.reject(error);
+        },
+      );
+    }
+    return { discarded: entries.length };
+  }
+
   /** The review queue: everything the parser couldn't (safely) file. */
   async getUnmatchedEmails() {
     return EmailsModel.scan({ status: { eq: 'unmatched' } })
