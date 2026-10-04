@@ -638,27 +638,48 @@ describe('SessionsController', () => {
         expect(service.updateSession).not.toHaveBeenCalled();
       });
 
-      it('a pending session is not locked: old app builds still take attendance here', async () => {
+      it.each([
+        ['a tutor', () => tutor, 'Completed'],
+        ['a tutor', () => tutor, 'Cancelled'],
+        ['a tutor', () => tutor, 'NCNS'],
+        ['an admin', () => admin, 'Completed'],
+        ['an admin', () => admin, 'Cancelled'],
+      ])(
+        '%s cannot take attendance through the ordinary update (%s)',
+        async (_who, user, status) => {
+          service.getSessionById.mockResolvedValue(session());
+          await expect(
+            controller.updateSession(reqAs(user()), session({ status })),
+          ).rejects.toThrow(
+            'Take attendance with PUT /sessions/:id/attendance.',
+          );
+          expect(service.updateSession).not.toHaveBeenCalled();
+        },
+      );
+
+      it('a session stored without a status counts as pending', async () => {
+        service.getSessionById.mockResolvedValue(
+          session({ status: undefined }),
+        );
+        await expect(
+          controller.updateSession(
+            reqAs(admin),
+            session({ status: 'Completed' }),
+          ),
+        ).rejects.toThrow('Take attendance with PUT /sessions/:id/attendance.');
+      });
+
+      it('a pending session is still edited freely while it stays pending', async () => {
         service.getSessionById.mockResolvedValue(session());
         await controller.updateSession(
           reqAs(tutor),
-          session({
-            status: 'Completed',
-            start_datetime: '2026-01-01T09:00:00Z',
-          }),
-        );
-        expect(service.updateSession).toHaveBeenCalled();
-      });
-
-      it('a session with no stored status counts as pending', async () => {
-        service.getSessionById.mockResolvedValue(
-          session({ status: undefined as unknown as string }),
+          session({ start_datetime: '2026-01-01T09:00:00Z' }),
         );
         await controller.updateSession(
           reqAs(tutor),
-          session({ status: 'Completed' }),
+          session({ status: undefined, notes: 'moved' }),
         );
-        expect(service.updateSession).toHaveBeenCalled();
+        expect(service.updateSession).toHaveBeenCalledTimes(2);
       });
     });
 

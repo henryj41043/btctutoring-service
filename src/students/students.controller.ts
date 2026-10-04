@@ -115,27 +115,13 @@ export class StudentsController {
     @Body() student: Student,
   ) {
     const user: User = req.user as User;
-    const groups: string[] = user.groups ?? [];
-    const isAdmin: boolean = groups.includes('Admins');
+    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
       return this.studentsService.updateStudent(student);
     }
-    // Tutor attendance must write the make-up bank (a cancelled session
-    // banks its minutes; a finalized make-up consumes them). A tutor-like
-    // user may perform THAT scoped write only, and only on a student they
-    // can see (assigned or slot tutor) — verified against the STORED
-    // student, never the payload.
-    if (isTutorLike(groups) && student.id) {
-      const stored = (await this.studentsService.getStudent(
-        student.id,
-      )) as unknown as Student[];
-      if (
-        stored?.[0] &&
-        this.studentsService.isVisibleToTutor(stored[0], user.contact)
-      ) {
-        return this.studentsService.updateStudentMakeup(student);
-      }
-    }
+    // Students are an admin's to edit. Attendance moves make-up minutes
+    // through PUT /sessions/:id/attendance, where the service does the math;
+    // a tutor has no student write at all.
     Logger.error('User not authorized to update students');
     throw new ForbiddenException('Unauthorized');
   }
