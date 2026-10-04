@@ -135,6 +135,118 @@ describe('Sessions (integration)', () => {
     expect(asStranger.status).toBe(403);
   });
 
+  describe('make-up set', () => {
+    const soon = (days: number, minutes = 15) => {
+      const start = new Date(Date.now() + days * 86400000);
+      return {
+        start_datetime: start.toISOString(),
+        end_datetime: new Date(start.getTime() + minutes * 60000).toISOString(),
+      };
+    };
+    const body = () => ({
+      student_id: 'st-1',
+      tutor_id: 'contact-tutor',
+      tutor_name: 'Tess',
+      sessions: [soon(1), soon(8), soon(15)],
+    });
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      StudentModel.get.mockResolvedValue({
+        id: 'st-1',
+        name: 'Pat',
+        status: 'Active Student',
+        assigned_tutor_id: 'contact-tutor',
+        make_up_minutes: 30,
+        make_up_batches: [
+          { minutes: 30, earned_date: new Date().toISOString() },
+        ],
+      });
+      scanResolves(Model, []);
+      Model.batchPut.mockResolvedValue(undefined);
+    });
+
+    it('a dry run previews the set and writes nothing', async () => {
+      const res = await request(server())
+        .post('/sessions/makeup-set?dry_run=true')
+        .set('x-test-role', 'tutor')
+        .send(body());
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        dry_run: true,
+        accepted: [0, 1],
+        skipped: [{ index: 2, reason: 'insufficient' }],
+        minutes_used: 30,
+        created: 0,
+      });
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('a tutor creates a set for their own student under one series', async () => {
+      const res = await request(server())
+        .post('/sessions/makeup-set')
+        .set('x-test-role', 'tutor')
+        .send(body());
+      expect(res.status).toBe(200);
+      expect(res.body.created).toBe(2);
+      const written = Model.batchPut.mock.calls[0][0];
+      expect(written).toHaveLength(2);
+      expect(
+        new Set(written.map((s: { series_id: string }) => s.series_id)).size,
+      ).toBe(1);
+      expect(written[0]).toMatchObject({
+        type: 'MAKE_UP',
+        tutor_id: 'contact-tutor',
+        student_id: 'st-1',
+      });
+    });
+
+    it('a tutor cannot create a set for another tutor, or for a student who is not theirs', async () => {
+      const other = await request(server())
+        .post('/sessions/makeup-set')
+        .set('x-test-role', 'tutor')
+        .send({ ...body(), tutor_id: 'someone-else' });
+      expect(other.status).toBe(403);
+
+      StudentModel.get.mockResolvedValue({
+        id: 'st-1',
+        status: 'Active Student',
+        assigned_tutor_id: 'someone-else',
+      });
+      const notTheirs = await request(server())
+        .post('/sessions/makeup-set')
+        .set('x-test-role', 'tutor')
+        .send(body());
+      expect(notTheirs.status).toBe(403);
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('a malformed request is refused before anything is read', async () => {
+      const res = await request(server())
+        .post('/sessions/makeup-set')
+        .set('x-test-role', 'admin')
+        .send({
+          student_id: 'st-1',
+          tutor_id: 't',
+          sessions: [{ start_datetime: 'x', end_datetime: 'y' }],
+        });
+      expect(res.status).toBe(400);
+      expect(StudentModel.get).not.toHaveBeenCalled();
+    });
+
+    it('a tutor reads a series as far as it is theirs', async () => {
+      scanResolves(Model, [
+        { id: 'a', series_id: 'set-1', tutor_id: 'contact-tutor' },
+        { id: 'b', series_id: 'set-1', tutor_id: 'someone-else' },
+      ]);
+      const res = await request(server())
+        .get('/sessions?series=set-1')
+        .set('x-test-role', 'tutor');
+      expect(res.status).toBe(200);
+      expect(res.body.map((s: { id: string }) => s.id)).toEqual(['a']);
+    });
+  });
+
   it('only an admin creates a custom trial', async () => {
     Model.__save.mockResolvedValue(undefined);
     const custom = {
