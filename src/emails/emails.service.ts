@@ -75,6 +75,23 @@ export class EmailsService {
       });
   }
 
+  /**
+   * Forwards the parser refused (unknown or unverified sender, spam, virus).
+   * Kept so nothing is lost silently: an admin can assign or discard them.
+   */
+  async getRejectedEmails() {
+    return EmailsModel.scan({ status: { eq: 'rejected' } })
+      .all()
+      .exec()
+      .then((entries) =>
+        this.sortNewestFirst(entries as unknown as EmailEntry[]),
+      )
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      });
+  }
+
   /** Files a queued email onto a contact, stamping who resolved it. */
   async assignEmail(id: string, contactId: string, assignedBy: string) {
     await this.requireEntry(id);
