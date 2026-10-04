@@ -3,7 +3,7 @@ import request from 'supertest';
 import { ScholarshipsController } from '../../src/scholarships/scholarships.controller';
 import { ScholarshipsService } from '../../src/scholarships/scholarships.service';
 import { ScholarshipsModel } from '../../src/models/scholarships.model';
-import { ModelMock } from '../model-mock';
+import { ModelMock, scanResolves } from '../model-mock';
 import { bootIntegrationApp } from './helpers';
 
 jest.mock('../../src/models/scholarships.model', () => ({
@@ -94,6 +94,22 @@ describe('Scholarships (integration)', () => {
 
     expect(res.status).toBe(400);
     expect(Model.__save).not.toHaveBeenCalled();
+  });
+
+  it('an admin deletes every record of a contact, and the route is not taken for a save', async () => {
+    scanResolves(Model, [{ id: 'c-1#2026-08' }, { id: 'c-1#2026-09' }]);
+    Model.delete.mockResolvedValue({});
+    const res = await request(server())
+      .delete('/scholarships/contact/c-1')
+      .set('x-test-role', 'admin');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: 2 });
+    expect(Model.delete).toHaveBeenCalledTimes(2);
+
+    const denied = await request(server())
+      .delete('/scholarships/contact/c-1')
+      .set('x-test-role', 'tutor');
+    expect(denied.status).toBe(403);
   });
 
   it('tutor is forbidden', async () => {

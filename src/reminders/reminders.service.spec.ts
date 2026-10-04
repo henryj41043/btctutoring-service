@@ -193,6 +193,40 @@ describe('RemindersService', () => {
       );
     });
 
+    it('deletes every reminder linked to a contact', async () => {
+      scanResolves(Model, [{ id: 'rem-1' }, { id: 'rem-2' }]);
+      Model.delete.mockResolvedValue({});
+      await expect(service.deleteRemindersByContact('c-1')).resolves.toEqual({
+        deleted: 2,
+      });
+      expect(Model.scan).toHaveBeenCalledWith({ contact_id: { eq: 'c-1' } });
+      expect(Model.delete.mock.calls).toEqual([
+        [{ id: 'rem-1' }],
+        [{ id: 'rem-2' }],
+      ]);
+    });
+
+    it('reports zero when no reminder is linked to the contact', async () => {
+      scanResolves(Model, []);
+      await expect(service.deleteRemindersByContact('c-1')).resolves.toEqual({
+        deleted: 0,
+      });
+      expect(Model.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the linked reminders cannot be read or deleted', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.deleteRemindersByContact('c-1')).rejects.toThrow(
+        'scan boom',
+      );
+      scanResolves(Model, [{ id: 'rem-1' }, { id: 'rem-2' }]);
+      Model.delete.mockRejectedValue(new Error('delete boom'));
+      await expect(service.deleteRemindersByContact('c-1')).rejects.toThrow(
+        'delete boom',
+      );
+      expect(Model.delete).toHaveBeenCalledTimes(1);
+    });
+
     it('deletes a reminder', async () => {
       Model.delete.mockResolvedValue({});
       const result = await service.deleteReminder('rem-1');

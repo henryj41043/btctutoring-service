@@ -37,6 +37,30 @@ export class ScholarshipsService {
       });
   }
 
+  /** Deletes every month's record of a contact (the contact is being deleted). */
+  async deleteScholarshipRecordsByContact(
+    contactId: string,
+  ): Promise<{ deleted: number }> {
+    const records = (await ScholarshipsModel.scan({
+      contact_id: { eq: contactId },
+    })
+      .all()
+      .exec()
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      })) as unknown as ScholarshipRecord[];
+    for (const record of records) {
+      await ScholarshipsModel.delete({ id: record.id as string }).catch(
+        (error: Error) => {
+          Logger.error(error.message, error);
+          return Promise.reject(error);
+        },
+      );
+    }
+    return { deleted: records.length };
+  }
+
   async getScholarshipRecordsByMonth(month: string) {
     return ScholarshipsModel.scan({
       month: { eq: month },

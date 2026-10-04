@@ -38,6 +38,7 @@ describe('ScholarshipsController', () => {
       getScholarshipRecordsByContact: jest.fn(),
       getScholarshipRecordsByMonth: jest.fn(),
       upsertScholarshipRecord: jest.fn(),
+      deleteScholarshipRecordsByContact: jest.fn(),
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ScholarshipsController],
@@ -45,6 +46,23 @@ describe('ScholarshipsController', () => {
     }).compile();
     controller = module.get(ScholarshipsController);
     service = module.get(ScholarshipsService);
+  });
+
+  it('admin deletes every record of a contact; a tutor cannot', async () => {
+    service.deleteScholarshipRecordsByContact.mockResolvedValue({
+      deleted: 4,
+    });
+    await expect(
+      controller.deleteScholarshipRecordsByContact(reqAs(admin), 'c-1'),
+    ).resolves.toEqual({ deleted: 4 });
+    expect(service.deleteScholarshipRecordsByContact).toHaveBeenCalledWith(
+      'c-1',
+    );
+    service.deleteScholarshipRecordsByContact.mockClear();
+    await expect(
+      controller.deleteScholarshipRecordsByContact(reqAs(tutor), 'c-1'),
+    ).rejects.toThrow('Unauthorized');
+    expect(service.deleteScholarshipRecordsByContact).not.toHaveBeenCalled();
   });
 
   it('admin gets all records with no query params', async () => {

@@ -76,6 +76,42 @@ describe('ScholarshipsService', () => {
     });
   });
 
+  describe('deleteScholarshipRecordsByContact', () => {
+    it("deletes every month's record of the contact", async () => {
+      scanResolves(Model, [{ id: 'c-1#2026-08' }, { id: 'c-1#2026-09' }]);
+      Model.delete.mockResolvedValue({});
+      await expect(
+        service.deleteScholarshipRecordsByContact('c-1'),
+      ).resolves.toEqual({ deleted: 2 });
+      expect(Model.scan).toHaveBeenCalledWith({ contact_id: { eq: 'c-1' } });
+      expect(Model.delete.mock.calls).toEqual([
+        [{ id: 'c-1#2026-08' }],
+        [{ id: 'c-1#2026-09' }],
+      ]);
+    });
+
+    it('reports zero for a contact without records', async () => {
+      scanResolves(Model, []);
+      await expect(
+        service.deleteScholarshipRecordsByContact('c-1'),
+      ).resolves.toEqual({ deleted: 0 });
+      expect(Model.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the records cannot be read or deleted', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(
+        service.deleteScholarshipRecordsByContact('c-1'),
+      ).rejects.toThrow('scan boom');
+      scanResolves(Model, [{ id: 'a' }, { id: 'b' }]);
+      Model.delete.mockRejectedValue(new Error('delete boom'));
+      await expect(
+        service.deleteScholarshipRecordsByContact('c-1'),
+      ).rejects.toThrow('delete boom');
+      expect(Model.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('upsertScholarshipRecord', () => {
     it('saves under the computed id with the full field set', async () => {
       Model.__save.mockResolvedValue(undefined);

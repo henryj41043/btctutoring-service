@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Logger,
+  Param,
   Post,
   Query,
   Request,
@@ -42,6 +44,19 @@ export class ScholarshipsController {
       return this.scholarshipsService.getScholarshipRecordsByMonth(month);
     }
     return this.scholarshipsService.getScholarshipRecords();
+  }
+
+  /** Deletes every record of a contact (the contact is being deleted). */
+  @Delete('contact/:contactId')
+  @UseGuards(AuthGuard('jwt'))
+  async deleteScholarshipRecordsByContact(
+    @Request() req: express.Request,
+    @Param('contactId') contactId: string,
+  ): Promise<{ deleted: number }> {
+    this.assertAdmin(req);
+    return this.scholarshipsService.deleteScholarshipRecordsByContact(
+      contactId,
+    );
   }
 
   @Post()
