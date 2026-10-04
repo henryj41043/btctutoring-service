@@ -1,3 +1,5 @@
+import { ScanStatus } from '../documents/scan-status';
+
 /**
  * One file an admin uploaded to a contact (a resume, a signed form).
  *
@@ -16,6 +18,11 @@ export class ContactDocument {
   s3_key?: string;
   /** pending until the upload is confirmed against what storage received. */
   status?: 'pending' | 'ready';
+  /**
+   * The malware scan's verdict; only a clean document can be opened. Absent
+   * on documents stored before scanning existed, which stay openable.
+   */
+  scan_status?: ScanStatus;
   uploaded_by?: string;
   uploaded_at?: string;
 }

@@ -1,6 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectTaggingCommand,
+  HeadObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { mockClient } from 'aws-sdk-client-mock';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DocumentsController } from '../../src/documents/documents.controller';
@@ -114,6 +118,48 @@ describe('Documents (integration)', () => {
     const removed = await asAdmin(request(server()).delete('/documents/d-1'));
     expect(removed.status).toBe(200);
     expect(Model.delete).toHaveBeenCalledWith({ id: 'd-1' });
+  });
+
+  it('a document is closed until the malware scan clears it', async () => {
+    const scanning = {
+      ...ready,
+      scan_status: 'scanning',
+      uploaded_at: new Date().toISOString(),
+    };
+    Model.get.mockResolvedValue(scanning);
+    const waiting = await asAdmin(
+      request(server()).get('/documents/d-1/url?mode=view'),
+    );
+    expect(waiting.status).toBe(400);
+    expect(waiting.body.message).toBe(
+      'This file is still being checked for malware. Try again in a moment.',
+    );
+
+    s3.on(GetObjectTaggingCommand).resolves({
+      TagSet: [{ Key: 'GuardDutyMalwareScanStatus', Value: 'THREATS_FOUND' }],
+    });
+    const blocked = await asAdmin(
+      request(server()).get('/documents/d-1/url?mode=download'),
+    );
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toBe(
+      'This file was blocked: the malware scan found a threat in it.',
+    );
+    expect(Model.update).toHaveBeenCalledWith(
+      { id: 'd-1' },
+      { scan_status: 'infected' },
+    );
+
+    s3.on(GetObjectTaggingCommand).resolves({
+      TagSet: [
+        { Key: 'GuardDutyMalwareScanStatus', Value: 'NO_THREATS_FOUND' },
+      ],
+    });
+    const open = await asAdmin(
+      request(server()).get('/documents/d-1/url?mode=view'),
+    );
+    expect(open.status).toBe(200);
+    expect(open.body).toEqual({ url: 'https://signed' });
   });
 
   it('deleting by contact is not mistaken for deleting by id', async () => {

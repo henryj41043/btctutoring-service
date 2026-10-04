@@ -8,6 +8,7 @@ import {
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  GetObjectTaggingCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -23,6 +24,12 @@ import {
   DocumentUrlMode,
   validateUpload,
 } from './document-rules';
+import {
+  SCAN_TAG,
+  scanBlockMessage,
+  scanStatusOfTag,
+  scanTimedOut,
+} from './scan-status';
 
 /** Presigned links live five minutes: long enough to use, short to leak. */
 export const LINK_SECONDS = 300;
@@ -86,6 +93,47 @@ export class DocumentsService {
   }
 
   /**
+   * Brings a document's scan status up to date from the scanner's tag. A
+   * clean or unscannable verdict is recorded; an infected file is removed
+   * from storage and its row kept, marked, so the admin sees what happened.
+   * A failed read changes nothing: the document simply stays unopenable.
+   */
+  private async resolveScan(
+    bucket: string,
+    row: ContactDocument,
+    now: Date,
+  ): Promise<ContactDocument> {
+    if (row.scan_status !== 'scanning') {
+      return row;
+    }
+    let tag: string | undefined;
+    try {
+      const tags = await this.s3.send(
+        new GetObjectTaggingCommand({ Bucket: bucket, Key: row.s3_key }),
+      );
+      tag = (tags.TagSet ?? []).find((item) => item.Key === SCAN_TAG)?.Value;
+    } catch (error) {
+      Logger.error(`Scan result of ${row.id} not read`, error as Error);
+      return row;
+    }
+    const status = scanStatusOfTag(tag);
+    if (status === 'scanning') {
+      // Not recorded, so a late verdict is still picked up.
+      return scanTimedOut(row.uploaded_at, now)
+        ? { ...row, scan_status: 'unscanned' }
+        : row;
+    }
+    if (status === 'infected') {
+      Logger.warn(`Document ${row.id} was blocked by the malware scan`);
+      await this.s3.send(
+        new DeleteObjectCommand({ Bucket: bucket, Key: row.s3_key }),
+      );
+    }
+    await DocumentsModel.update({ id: row.id }, { scan_status: status });
+    return { ...row, scan_status: status };
+  }
+
+  /**
    * A contact's documents, newest first. Upload links that were never used
    * are cleared on the way; a failure there never fails the list.
    */
@@ -108,9 +156,15 @@ export class DocumentsService {
         ),
       );
     }
-    return rows
-      .filter((row) => row.status === 'ready')
-      .sort((a, b) => (b.uploaded_at ?? '').localeCompare(a.uploaded_at ?? ''));
+    const ready = rows.filter((row) => row.status === 'ready');
+    const resolved = ready.some((row) => row.scan_status === 'scanning')
+      ? await Promise.all(
+          ready.map((row) => this.resolveScan(this.bucket(), row, now)),
+        )
+      : ready;
+    return resolved.sort((a, b) =>
+      (b.uploaded_at ?? '').localeCompare(a.uploaded_at ?? ''),
+    );
   }
 
   /** Step 1 of an upload: checks the request and signs a link for that exact file. */
@@ -191,19 +245,26 @@ export class DocumentsService {
     }
     return (await DocumentsModel.update(
       { id },
-      { status: 'ready' },
+      // The scan starts when the file lands and takes a few seconds.
+      { status: 'ready', scan_status: 'scanning' },
     )) as unknown as ContactDocument;
   }
 
-  /** A short-lived link that shows the file in the browser or downloads it. */
+  /** A short-lived link to a file that passed the malware scan. */
   async getDocumentUrl(
     id: string,
     mode: DocumentUrlMode,
+    now: Date = new Date(),
   ): Promise<{ url: string }> {
     const bucket = this.bucket();
-    const row = await this.requireDocument(id);
-    if (row.status !== 'ready' || !row.s3_key) {
+    const stored = await this.requireDocument(id);
+    if (stored.status !== 'ready' || !stored.s3_key) {
       throw new NotFoundException('Document not found');
+    }
+    const row = await this.resolveScan(bucket, stored, now);
+    const blocked = scanBlockMessage(row.scan_status);
+    if (blocked) {
+      throw new BadRequestException(blocked);
     }
     const url = await getSignedUrl(
       this.s3,
