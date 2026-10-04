@@ -43,7 +43,6 @@ describe('StudentsController', () => {
       withContactNames: jest.fn(),
       createStudent: jest.fn(),
       updateStudent: jest.fn(),
-      updateStudentMakeup: jest.fn(),
       isVisibleToTutor: jest.fn(),
       deleteStudent: jest.fn(),
     };
@@ -245,49 +244,24 @@ describe('StudentsController', () => {
       await controller.updateStudent(reqAs(admin), student);
       expect(service.updateStudent).toHaveBeenCalledWith(student);
       expect(service.getStudent).not.toHaveBeenCalled();
-      expect(service.updateStudentMakeup).not.toHaveBeenCalled();
     });
 
-    it('a tutor gets the SCOPED make-up write on their own student', async () => {
-      service.getStudent.mockResolvedValue([student] as never);
-      service.isVisibleToTutor.mockReturnValue(true);
-      await controller.updateStudent(reqAs(tutor), student);
-      // Visibility is verified against the STORED student, never the payload.
-      expect(service.getStudent).toHaveBeenCalledWith('student-1');
-      expect(service.isVisibleToTutor).toHaveBeenCalledWith(
-        student,
-        tutor.contact,
-      );
-      expect(service.updateStudentMakeup).toHaveBeenCalledWith(student);
-      expect(service.updateStudent).not.toHaveBeenCalled();
-    });
-
-    it('a lead tutor gets the same scoped write (attendance parity)', async () => {
-      service.getStudent.mockResolvedValue([student] as never);
-      service.isVisibleToTutor.mockReturnValue(true);
-      await controller.updateStudent(reqAs(lead), student);
-      expect(service.updateStudentMakeup).toHaveBeenCalledWith(student);
-    });
-
-    it("a tutor cannot write another tutor's student", async () => {
-      service.getStudent.mockResolvedValue([student] as never);
-      service.isVisibleToTutor.mockReturnValue(false);
-      await expect(
-        controller.updateStudent(reqAs(tutor), student),
-      ).rejects.toThrow('Unauthorized');
-      expect(service.updateStudentMakeup).not.toHaveBeenCalled();
-    });
-
-    it('a tutor update of a missing or id-less student is rejected', async () => {
-      service.getStudent.mockResolvedValue([] as never);
-      await expect(
-        controller.updateStudent(reqAs(tutor), student),
-      ).rejects.toThrow('Unauthorized');
-      await expect(
-        controller.updateStudent(reqAs(tutor), { name: 'NoId' } as Student),
-      ).rejects.toThrow('Unauthorized');
-      expect(service.updateStudentMakeup).not.toHaveBeenCalled();
-    });
+    it.each([
+      ['tutor', () => tutor],
+      ['lead tutor', () => lead],
+    ])(
+      'a %s cannot write a student, not even one of their own',
+      async (_who, user) => {
+        service.getStudent.mockResolvedValue([student] as never);
+        service.isVisibleToTutor.mockReturnValue(true);
+        await expect(
+          controller.updateStudent(reqAs(user()), student),
+        ).rejects.toThrow('Unauthorized');
+        expect(service.updateStudent).not.toHaveBeenCalled();
+        // No lookup either: the refusal does not depend on the student.
+        expect(service.getStudent).not.toHaveBeenCalled();
+      },
+    );
 
     it('admin deletes a student', async () => {
       await controller.deleteStudent(reqAs(admin), 'student-1');

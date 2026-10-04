@@ -31,6 +31,9 @@ import { User } from '../models/user.model';
 import { Session, SessionType } from '../models/session.model';
 import { isLeadTutor, isTutorLike } from '../models/user-groups';
 
+export const ATTENDANCE_ROUTE_MESSAGE =
+  'Take attendance with PUT /sessions/:id/attendance.';
+
 export const SESSION_TYPE_LOCKED_MESSAGE =
   'Only an admin can change the session type.';
 
@@ -197,6 +200,15 @@ export class SessionsController {
         );
         throw new ForbiddenException(ATTENDANCE_FINAL_MESSAGE);
       }
+    }
+    // Taking attendance moves make-up minutes and is recorded, so it only
+    // happens through the attendance route: the ordinary update never turns
+    // a pending session into a finalized one, whoever asks.
+    if (stored && !isFinalized(stored.status) && isFinalized(session.status)) {
+      Logger.error(
+        `Session ${session.id}: refused attendance through the ordinary update`,
+      );
+      throw new BadRequestException(ATTENDANCE_ROUTE_MESSAGE);
     }
     // The type decides how a session is paid and whether a cancellation
     // banks make-up minutes, so only an admin may change it. Sessions stored
