@@ -114,6 +114,8 @@ export class Student {
   service_end_date?: string | null;
   /** The status applied by the daily job once service_end_date has passed. */
   end_status?: string | null;
+  /** The service_end_date the admins were reminded about (daily job). */
+  end_reminder_sent?: string;
   /** Monthly price replacing the package's price for this student (null on save = clear). */
   price_override?: number | null;
   /** Percent (0-100) taken off this student's package charge (null or 0 on save = clear). */
