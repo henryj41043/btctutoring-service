@@ -2,7 +2,7 @@ export enum SessionType {
   TUTORING = 'TUTORING',
   MAKE_UP = 'MAKE_UP',
   ADMIN = 'ADMIN',
-  /** 45-minute onboarding trial; payroll pays a flat hour (client policy). */
+  /** Onboarding trial (30/45 min); payroll pays its actual length. */
   TRIAL = 'TRIAL',
   /**
    * "BTC & Me" 45-minute weekly group session: one tutor, many students
