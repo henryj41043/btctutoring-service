@@ -30,6 +30,7 @@ describe('StatementService', () => {
     getBillingRecordsByMonth: jest.fn(),
     getFrozenStatements: jest.fn(),
     createFrozenStatementIfAbsent: jest.fn(),
+    replaceFrozenStatement: jest.fn(),
   };
   // Sept 28 2026, mid-morning Eastern: September is the current month.
   const NOW = new Date('2026-09-28T14:00:00Z');
@@ -268,6 +269,61 @@ describe('StatementService', () => {
       expect(billing.getFrozenStatements).not.toHaveBeenCalled();
       await service.getStatements('2026-09', new Date('2026-10-01T04:00:00Z'));
       expect(billing.getFrozenStatements).toHaveBeenCalledWith('2026-09');
+    });
+  });
+
+  describe('refreezeFamily', () => {
+    beforeEach(() =>
+      billing.replaceFrozenStatement.mockResolvedValue(undefined),
+    );
+
+    it("replaces one family's frozen statement with today's calculation", async () => {
+      const res = await service.refreezeFamily('2026-08', 'c-1', NOW);
+      expect(res).toEqual({
+        month: '2026-08',
+        contact_id: 'c-1',
+        replaced: true,
+      });
+      expect(billing.getBillingRecordsByMonth).toHaveBeenCalledWith('2026-08');
+      const [item] = billing.replaceFrozenStatement.mock.calls[0];
+      expect(item).toEqual({
+        contact_id: 'c-1',
+        month: '2026-08',
+        frozen_at: NOW.toISOString(),
+        statement: expect.any(String),
+      });
+      const stored = JSON.parse(item.statement);
+      expect(stored.total).toBe(273);
+      expect(stored.month).toBe('2026-08');
+      expect(stored.frozen_at).toBe(NOW.toISOString());
+      expect(billing.createFrozenStatementIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it('leaves the stored copy alone when the family bills nothing that month', async () => {
+      students.getStudents.mockResolvedValue([]);
+      const res = await service.refreezeFamily('2026-08', 'c-1', NOW);
+      expect(res).toEqual({
+        month: '2026-08',
+        contact_id: 'c-1',
+        replaced: false,
+      });
+      expect(billing.replaceFrozenStatement).not.toHaveBeenCalled();
+    });
+
+    it('refuses an open month, a missing contact id and an unknown contact', async () => {
+      await expect(
+        service.refreezeFamily('2026-09', 'c-1', NOW),
+      ).rejects.toThrow('Only a month that has ended can be frozen.');
+      await expect(service.refreezeFamily('2026-08', '', NOW)).rejects.toThrow(
+        'contact_id is required.',
+      );
+      await expect(
+        service.refreezeFamily('2026-08', 'c-9', NOW),
+      ).rejects.toThrow('Contact not found.');
+      await expect(
+        service.refreezeFamily('2026-8', 'c-1', NOW),
+      ).rejects.toThrow('month must be formatted YYYY-MM.');
+      expect(billing.replaceFrozenStatement).not.toHaveBeenCalled();
     });
   });
 

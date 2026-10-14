@@ -364,6 +364,35 @@ describe('BillingService', () => {
       });
     });
 
+    it('replaceFrozenStatement overwrites the stored copy and surfaces a failure', async () => {
+      Model.create.mockResolvedValue({});
+      await service.replaceFrozenStatement({
+        contact_id: 'c-1',
+        month: '2026-08',
+        frozen_at: '2026-10-14T20:00:00.000Z',
+        statement: '{"b":2}',
+      });
+      expect(Model.create).toHaveBeenCalledWith(
+        {
+          id: 'stmt#c-1#2026-08',
+          contact_id: 'c-1',
+          statement_month: '2026-08',
+          frozen_at: '2026-10-14T20:00:00.000Z',
+          statement: '{"b":2}',
+        },
+        { overwrite: true },
+      );
+      Model.create.mockRejectedValue(new Error('ddb down'));
+      await expect(
+        service.replaceFrozenStatement({
+          contact_id: 'c-1',
+          month: '2026-08',
+          frozen_at: 'x',
+          statement: '{}',
+        }),
+      ).rejects.toThrow('ddb down');
+    });
+
     it('marks a legacy statement', async () => {
       Model.create.mockResolvedValue({});
       await service.createFrozenStatementIfAbsent({

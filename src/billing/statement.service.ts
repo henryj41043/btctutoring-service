@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  NotFoundException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -25,6 +26,14 @@ export interface FreezeResult {
   month: string;
   /** Statements written by this run (families already frozen are skipped). */
   frozen: number;
+}
+
+/** POST /billing/statements/refreeze result. */
+export interface RefreezeResult {
+  month: string;
+  contact_id: string;
+  /** False when the family bills nothing that month (nothing stored). */
+  replaced: boolean;
 }
 
 /** POST /billing/statements/preview payload. */
@@ -108,6 +117,64 @@ export class StatementService {
       parsed.month,
       catalog,
     );
+  }
+
+  /**
+   * Re-freezes ONE family's statement for a closed month, replacing the
+   * stored copy with today's calculation (an admin's remedy after a billing
+   * rule change, or for a student entered after the month was frozen).
+   * Payments and overrides live in the billing records and are laid over
+   * the statement on read, so nothing recorded is lost.
+   */
+  async refreezeFamily(
+    month: string,
+    contactId: string,
+    now: Date = new Date(),
+  ): Promise<RefreezeResult> {
+    const parsed = this.monthOf(month);
+    if (month >= easternDateKey(now).slice(0, 7)) {
+      throw new BadRequestException(
+        'Only a month that has ended can be frozen.',
+      );
+    }
+    if (!contactId) {
+      throw new BadRequestException('contact_id is required.');
+    }
+    const catalog = await this.catalog();
+    const [students, contacts, records] = await Promise.all([
+      this.students.getStudents(),
+      this.contacts.getContacts(),
+      this.billing.getBillingRecordsByMonth(month),
+    ]);
+    const contact = (contacts as unknown as Contact[]).find(
+      (c) => c.id === contactId,
+    );
+    if (!contact) {
+      throw new NotFoundException('Contact not found.');
+    }
+    const statement = buildStatement(
+      contact,
+      students as unknown as Student[],
+      records as unknown as BillingRecord[],
+      parsed.year,
+      parsed.month,
+      catalog,
+    );
+    if (!statement) {
+      this.logger.warn(
+        `Refreeze ${month} for ${contactId}: nothing to bill, stored copy left as is.`,
+      );
+      return { month, contact_id: contactId, replaced: false };
+    }
+    const frozenAt = now.toISOString();
+    await this.billing.replaceFrozenStatement({
+      contact_id: contactId,
+      month,
+      frozen_at: frozenAt,
+      statement: JSON.stringify({ ...statement, frozen_at: frozenAt }),
+    });
+    this.logger.log(`Re-froze ${month} for ${contactId}.`);
+    return { month, contact_id: contactId, replaced: true };
   }
 
   /** The frozen statements of a month; an unreadable one is skipped and logged. */

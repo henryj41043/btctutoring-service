@@ -121,6 +121,31 @@ export class BillingService {
       });
   }
 
+  /**
+   * Replaces a family's frozen statement for a month (or writes it when
+   * absent): the admin's re-freeze after a billing-rule change.
+   */
+  async replaceFrozenStatement(item: {
+    contact_id: string;
+    month: string;
+    frozen_at: string;
+    statement: string;
+  }): Promise<void> {
+    await BillingModel.create(
+      {
+        id: BillingService.statementId(item.contact_id, item.month),
+        contact_id: item.contact_id,
+        statement_month: item.month,
+        frozen_at: item.frozen_at,
+        statement: item.statement,
+      },
+      { overwrite: true },
+    ).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    });
+  }
+
   /** True if a dynamoose error is the conditional "item already exists" failure. */
   private static isAlreadyExists(error: unknown): boolean {
     const e = error as { name?: string; message?: string };

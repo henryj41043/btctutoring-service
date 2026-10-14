@@ -16,6 +16,7 @@ import {
 } from './package-config';
 import { GROUP_MONTHLY_FEE, siblingDiscountedTotal } from './billing-amount';
 import { dateKey, dayBefore, keyOf } from './eastern-time';
+import { addDays, billingMonthOf, weekOf } from './billing-weeks';
 
 export { dateKey, dayBefore, keyOf };
 
@@ -29,6 +30,14 @@ export { dateKey, dayBefore, keyOf };
  *   a segment that covers every scheduled session of the month bills the
  *   full monthly price; any other segment bills per scheduled session,
  *   capped at the monthly price.
+ *
+ * "The month" is the calendar month, except at the two ends of a student's
+ * service (client rule 2026-10-13): the Sunday–Saturday week holding the
+ * service start, and the one holding the service end, belong entirely to the
+ * month with most of their days (see billing-weeks.ts). A student starting
+ * Thu Oct 1 has Oct 1–3 billed on September; one ending Tue Dec 1 has
+ * Nov 29–Dec 1 billed on December. Package changes in between keep the
+ * calendar month.
  *
  * Sessions are counted from the SCHEDULE, never from attendance.
  */
@@ -144,21 +153,16 @@ export function parseMonth(
   return { year: Number(match[1]), month: m - 1 };
 }
 
-/** Scheduled slots falling on the days of [from, to] within one month. */
+/** Scheduled slots falling on the days of [from, to] (any span of days). */
 export function countSlotsBetween(
   schedule: ScheduleSlot[],
-  year: number,
-  month: number,
   from: string,
   to: string,
 ): number {
-  if (schedule.length === 0) return 0;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  if (schedule.length === 0 || from > to) return 0;
   let count = 0;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const key = dateKey(year, month, day);
-    if (key < from || key > to) continue;
-    const weekday = WEEKDAY_BY_JS_DAY[new Date(year, month, day).getDay()];
+  for (let key = from; key <= to; key = addDays(key, 1)) {
+    const weekday = WEEKDAY_BY_JS_DAY[new Date(`${key}T00:00:00Z`).getUTCDay()];
     count += schedule.filter((s) => s.weekday === weekday).length;
   }
   return count;
@@ -224,28 +228,79 @@ export function segmentsOf(student: Student): ServiceSegment[] {
   });
 
   const serviceEnd = keyOf(student.service_end_date);
-  if (!serviceEnd) return segments;
-  return segments
-    .filter((s) => !s.start || s.start <= serviceEnd)
-    .map((s) => ({
-      ...s,
-      end: s.end && s.end < serviceEnd ? s.end : serviceEnd,
-    }));
+  const bounded = serviceEnd
+    ? segments
+        .filter((s) => !s.start || s.start <= serviceEnd)
+        .map((s) => ({
+          ...s,
+          end: s.end && s.end < serviceEnd ? s.end : serviceEnd,
+        }))
+    : segments;
+  return bounded;
 }
 
-/** One segment's line for a month; null when the segment misses the month. */
+/** The first and last days of a student's service, from their segments. */
+export function serviceBounds(segments: ServiceSegment[]): {
+  start?: string;
+  end?: string;
+} {
+  if (segments.length === 0) return {};
+  return {
+    start: segments[0].start,
+    end: segments[segments.length - 1].end,
+  };
+}
+
+/**
+ * The days a month's statement bills for a student: the calendar month,
+ * with the week holding the service start and the week holding the service
+ * end each moved whole to the month that owns them (the straddling weeks
+ * rule). Only those two weeks ever cross a month end.
+ */
+export function billingWindow(
+  bounds: { start?: string; end?: string },
+  year: number,
+  month: number,
+): { from: string; to: string } {
+  const monthKey = `${year}-${pad(month + 1)}`;
+  let from = dateKey(year, month, 1);
+  let to = dateKey(year, month, new Date(year, month + 1, 0).getDate());
+  for (const edge of [bounds.start, bounds.end]) {
+    if (!edge) continue;
+    const week = weekOf(edge);
+    if (billingMonthOf(edge) === monthKey) {
+      // The week is ours, including its days in the neighbouring month.
+      if (week.sunday < from) from = week.sunday;
+      if (week.saturday > to) to = week.saturday;
+    } else if (week.sunday < from && week.saturday >= from) {
+      // The week belongs to the previous month: it takes our first days.
+      from = addDays(week.saturday, 1);
+    } else if (week.saturday > to && week.sunday <= to) {
+      // The week belongs to the next month: it takes our last days.
+      to = addDays(week.sunday, -1);
+    }
+  }
+  return { from, to };
+}
+
+/**
+ * One segment's line for a month; null when the segment misses the month.
+ * `window` is the student's billing window for the month (see
+ * billingWindow); it defaults to the calendar month.
+ */
 export function segmentLine(
   segment: ServiceSegment,
   student: Pick<Student, 'id' | 'name'>,
   year: number,
   month: number,
   catalog: PackageCatalog,
+  window: { from: string; to: string } = billingWindow({}, year, month),
 ): StatementLine | null {
-  const monthStart = dateKey(year, month, 1);
-  const monthEnd = dateKey(year, month, new Date(year, month + 1, 0).getDate());
+  const windowStart = window.from;
+  const windowEnd = window.to;
   const from =
-    segment.start && segment.start > monthStart ? segment.start : monthStart;
-  const to = segment.end && segment.end < monthEnd ? segment.end : monthEnd;
+    segment.start && segment.start > windowStart ? segment.start : windowStart;
+  const to = segment.end && segment.end < windowEnd ? segment.end : windowEnd;
   if (from > to) return null;
 
   const base: StatementLine = {
@@ -283,14 +338,8 @@ export function segmentLine(
     : def.monthlyCost;
   const rate = perSessionCost({ ...def, monthlyCost: monthly });
   const schedule = segment.schedule ?? [];
-  const inMonth = countSlotsBetween(
-    schedule,
-    year,
-    month,
-    monthStart,
-    monthEnd,
-  );
-  const regular = countSlotsBetween(schedule, year, month, from, to);
+  const inMonth = countSlotsBetween(schedule, windowStart, windowEnd);
+  const regular = countSlotsBetween(schedule, from, to);
   const oneOff = (segment.first_week_sessions ?? []).filter(
     (s) => !!s && typeof s.date === 'string' && s.date >= from && s.date <= to,
   ).length;
@@ -302,8 +351,8 @@ export function segmentLine(
   const amount = full ? monthly : Math.min(monthly, round2(rate * billed));
 
   const flags: LineFlag[] = [];
-  if (!full && from > monthStart) flags.push('prorated_start');
-  if (!full && to < monthEnd) flags.push('prorated_end');
+  if (!full && from > windowStart) flags.push('prorated_start');
+  if (!full && to < windowEnd) flags.push('prorated_end');
   if (overridden) flags.push('price_override');
 
   return withDiscount(
@@ -384,8 +433,10 @@ export function studentLines(
     );
   }
 
-  for (const segment of segmentsOf(student)) {
-    const line = segmentLine(segment, student, year, month, catalog);
+  const segments = segmentsOf(student);
+  const window = billingWindow(serviceBounds(segments), year, month);
+  for (const segment of segments) {
+    const line = segmentLine(segment, student, year, month, catalog, window);
     if (line) lines.push(line);
   }
 
@@ -407,17 +458,23 @@ export function studentLines(
 /**
  * Where a semi-monthly family pays a student's month: a prorated start on
  * or after the 15th lands entirely on the 15th, a prorated ending before
- * the 15th entirely on the 1st, everything else splits evenly.
+ * the 15th entirely on the 1st, everything else splits evenly. Dates are
+ * compared with the statement month's 15th: a line may begin in the
+ * previous month's days (a straddling week).
  */
-export function splitKindOf(lines: StatementLine[]): SplitKind {
+export function splitKindOf(
+  lines: StatementLine[],
+  year: number,
+  month: number,
+): SplitKind {
   if (lines.length === 0) return 'split';
   const first = lines[0];
   const last = lines[lines.length - 1];
-  const dayOf = (key: string): number => Number(key.slice(8, 10));
-  if (first.flags.includes('prorated_start') && dayOf(first.from) >= 15) {
+  const fifteenth = dateKey(year, month, 15);
+  if (first.flags.includes('prorated_start') && first.from >= fifteenth) {
     return 'fifteenth';
   }
-  if (last.flags.includes('prorated_end') && dayOf(last.to) < 15) {
+  if (last.flags.includes('prorated_end') && last.to < fifteenth) {
     return 'first';
   }
   return 'split';
@@ -436,7 +493,14 @@ export function isBillableInMonth(
   if (!student.contact_id) return false;
   if (!student.package && !student.btc_and_me) return false;
   const serviceEnd = keyOf(student.service_end_date);
-  if (serviceEnd) return serviceEnd >= dateKey(year, month, 1);
+  // An end whose week belongs to the next month (Mon Nov 30 → December)
+  // keeps the student on that month's statement too.
+  if (serviceEnd) {
+    return (
+      serviceEnd >= dateKey(year, month, 1) ||
+      billingMonthOf(serviceEnd) === `${year}-${pad(month + 1)}`
+    );
+  }
   return student.status === STUDENT_STATUS.ACTIVE_STUDENT;
 }
 
@@ -492,7 +556,7 @@ export function buildStatement(
     const own = studentLines(student, year, month, catalog);
     lines.push(...own);
     const net = own.reduce((sum, l) => sum + l.net, 0);
-    const kind = splitKindOf(own);
+    const kind = splitKindOf(own, year, month);
     if (kind === 'first') rawFirst += net;
     else if (kind === 'split') rawFirst += net / 2;
   }
