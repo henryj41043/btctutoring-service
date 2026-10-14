@@ -124,8 +124,13 @@ export class PackagesService {
         `'${CUSTOM_PACKAGE}' is reserved for per-student custom packages.`,
       );
     }
+    // A $0 package is allowed (client 2026-10-13): students who are not
+    // charged still get sessions, payroll and a $0 line on the Billing page.
+    const cost = row.monthlyCost;
+    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) {
+      throw new BadRequestException('The monthly cost must be $0 or more.');
+    }
     for (const [label, value] of [
-      ['monthly cost', row.monthlyCost],
       ['sessions per week', row.sessionsPerWeek],
       ['session length', row.sessionLengthMin],
     ] as const) {

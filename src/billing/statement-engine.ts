@@ -39,7 +39,9 @@ export type LineFlag =
   | 'package_change'
   | 'price_override'
   | 'discount'
-  | 'unpriced';
+  | 'unpriced'
+  /** Statement-level: every line is $0 (a ghost package), nothing is owed. */
+  | 'no_charge';
 
 /** How a student's charge lands on a semi-monthly family's two due dates. */
 export type SplitKind = 'split' | 'first' | 'fifteenth';
@@ -463,7 +465,9 @@ const isSemiMonthly = (cycle: string | undefined): boolean =>
   cycle === 'semi_monthly' || cycle === 'biweekly';
 
 /**
- * One family's statement for a month; null when nothing is billable.
+ * One family's statement for a month; null when nothing is billable. A
+ * family whose students are all on a $0 package still gets a statement
+ * (client 2026-10-13): it shows on the Billing page, flagged 'no_charge'.
  * Order of operations: price → proration → student discount → sibling
  * discount (3+ packaged students) → flat group fee → semi-monthly split →
  * per-date override.
@@ -497,7 +501,7 @@ export function buildStatement(
   const subtotal = round2(lines.reduce((sum, l) => sum + l.net, 0));
   const groupStudents = billable.filter((s) => s.btc_and_me);
   const groupFee = GROUP_MONTHLY_FEE * groupStudents.length;
-  if (gross <= 0 && groupFee <= 0) return null;
+  if (lines.length === 0 && groupFee <= 0) return null;
 
   const discounted = siblingDiscountedTotal(
     subtotal,
@@ -533,6 +537,7 @@ export function buildStatement(
       if (!flags.includes(flag)) flags.push(flag);
     }
   }
+  if (lines.length > 0 && gross <= 0 && groupFee <= 0) flags.push('no_charge');
 
   return applyRecords(
     {
