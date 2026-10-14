@@ -25,6 +25,8 @@ import {
 const catalog: PackageCatalog = {
   Start: { monthlyCost: 273, sessionsPerWeek: 1, sessionLengthMin: 45 },
   Succeed: { monthlyCost: 456, sessionsPerWeek: 2, sessionLengthMin: 45 },
+  // A ghost package: sessions and payroll as usual, nothing charged.
+  Ghost: { monthlyCost: 0, sessionsPerWeek: 1, sessionLengthMin: 45 },
 };
 
 // September 2026: the 1st is a Tuesday. Mondays 7, 14, 21, 28;
@@ -1007,16 +1009,59 @@ describe('buildStatement', () => {
         catalog,
       ),
     ).toBeNull();
-    expect(
-      buildStatement(
-        contact(),
-        [student({ package: 'Custom' })],
-        [],
-        Y,
-        SEP,
-        catalog,
-      ),
-    ).toBeNull();
+  });
+
+  it('an unpriced family still gets a $0 statement that needs attention', () => {
+    const s = statementFor([student({ package: 'Custom' })]);
+    expect(s.total).toBe(0);
+    expect(s.flags).toEqual(['unpriced', 'no_charge']);
+    expect(s.needs_attention).toBe(true);
+  });
+
+  it('a family on a $0 (ghost) package gets a $0 statement flagged no charge', () => {
+    const s = statementFor([student({ package: 'Ghost' })]);
+    expect(s.lines).toEqual([
+      expect.objectContaining({
+        student_name: 'Pat',
+        package: 'Ghost',
+        amount: 0,
+        net: 0,
+        flags: [],
+      }),
+    ]);
+    expect(s.package_gross).toBe(0);
+    expect(s.total).toBe(0);
+    expect(s.dues).toEqual([
+      expect.objectContaining({ day: 1, derived: 0, amount: 0, paid: false }),
+    ]);
+    expect(s.total_due).toBe(0);
+    expect(s.flags).toEqual(['no_charge']);
+    expect(s.needs_attention).toBe(false);
+  });
+
+  it('a ghost sibling adds a $0 line to a paying family, with no no-charge flag', () => {
+    const s = statementFor([
+      student(),
+      student({ id: 's-2', name: 'Sam', package: 'Ghost' }),
+    ]);
+    expect(s.lines.map((l) => [l.student_name, l.amount])).toEqual([
+      ['Pat', 273],
+      ['Sam', 0],
+    ]);
+    expect(s.total).toBe(273);
+    expect(s.flags).toEqual([]);
+  });
+
+  it('a semi-monthly ghost family owes $0 on both dates', () => {
+    const s = statementFor(
+      [student({ package: 'Ghost' })],
+      contact({ billing_cycle: 'semi_monthly' }),
+    );
+    expect(s.dues.map((d) => [d.day, d.amount])).toEqual([
+      [1, 0],
+      [15, 0],
+    ]);
+    expect(s.flags).toEqual(['no_charge']);
   });
 
   it('a fully discounted family still gets a statement', () => {

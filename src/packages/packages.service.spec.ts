@@ -98,10 +98,26 @@ describe('PackagesService', () => {
     expect(Model.create).not.toHaveBeenCalled();
   });
 
-  it('createPackage rejects each non-positive number separately', async () => {
+  it('createPackage allows a $0 monthly cost (a ghost package)', async () => {
+    Model.create.mockResolvedValue(undefined);
     await expect(
-      service.createPackage(row({ monthlyCost: 0 })),
+      service.createPackage(row({ id: 'Ghost', monthlyCost: 0 })),
+    ).resolves.toEqual(expect.objectContaining({ id: 'Ghost' }));
+    expect(Model.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'Ghost', monthlyCost: 0 }),
+    );
+  });
+
+  it('createPackage rejects each bad number separately', async () => {
+    await expect(
+      service.createPackage(row({ monthlyCost: -1 })),
+    ).rejects.toThrow('monthly cost must be $0 or more');
+    await expect(
+      service.createPackage(row({ monthlyCost: Number.NaN })),
     ).rejects.toThrow('monthly cost');
+    await expect(
+      service.createPackage(row({ sessionsPerWeek: 0 })),
+    ).rejects.toThrow('sessions per week');
     await expect(
       service.createPackage(row({ sessionsPerWeek: -1 })),
     ).rejects.toThrow('sessions per week');
