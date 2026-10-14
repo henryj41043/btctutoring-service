@@ -187,6 +187,37 @@ export class StudentsService {
   }
 
   /**
+   * Rejects a malformed package start date, or one on or after the first
+   * scheduled change, before anything is written (null = clear, undefined =
+   * leave alone). Both stored forms are accepted: 'YYYY-MM-DD' alone or
+   * followed by a time.
+   */
+  private assertPackageStart(student: Student): void {
+    const start: unknown = student.package_start_date;
+    if (start === undefined || start === null) return;
+    const key = typeof start === 'string' ? start.slice(0, 10) : '';
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(key) ||
+      isNaN(Date.parse(`${key}T00:00:00Z`))
+    ) {
+      throw new BadRequestException(
+        'package_start_date must be a date (YYYY-MM-DD), or null to clear.',
+      );
+    }
+    const changes =
+      this.pendingChangesRequested(student) ?? pendingChangesOf(student);
+    const first = changes
+      .map((c) => c.effective.slice(0, 10))
+      .sort()
+      .find((effective) => effective <= key);
+    if (first) {
+      throw new BadRequestException(
+        `The package start date must be before the first scheduled change (${first}).`,
+      );
+    }
+  }
+
+  /**
    * Rejects a malformed service end date or end status before anything is
    * written (null = clear, undefined = leave alone).
    */
@@ -572,6 +603,7 @@ export class StudentsService {
   async createStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    this.assertPackageStart(student);
     this.assertFirstWeekSessions(student);
     await this.assertPendingChanges(student, now);
     const newUuid: string = randomUUID();
@@ -605,6 +637,7 @@ export class StudentsService {
   async updateStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
     this.assertServiceEnd(student);
+    this.assertPackageStart(student);
     this.assertFirstWeekSessions(student);
     await this.assertPendingChanges(student, now);
     const attributes = this.buildStudentAttributes(student);
