@@ -452,7 +452,10 @@ export function studentNeedsAttention(
   return (
     !student.package_start_date ||
     !student.schedule ||
-    student.schedule.length === 0
+    student.schedule.length === 0 ||
+    // A package change applied without its own schedule leaves the old
+    // slots behind (2 days on a 3-a-week package): proration would be off.
+    student.schedule.length !== def.sessionsPerWeek
   );
 }
 
