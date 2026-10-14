@@ -904,6 +904,41 @@ describe('studentNeedsAttention', () => {
       true,
     );
   });
+
+  it('flags a schedule whose slot count differs from the package', () => {
+    // Succeed is 2 a week: one slot (a change applied without a schedule) or
+    // three slots are both wrong; two are right.
+    expect(
+      studentNeedsAttention(
+        student({ package: 'Succeed', schedule: MONDAY }),
+        catalog,
+      ),
+    ).toBe(true);
+    expect(
+      studentNeedsAttention(
+        student({ package: 'Succeed', schedule: [...WED_FRI, ...MONDAY] }),
+        catalog,
+      ),
+    ).toBe(true);
+    expect(
+      studentNeedsAttention(
+        student({ package: 'Succeed', schedule: WED_FRI }),
+        catalog,
+      ),
+    ).toBe(false);
+    expect(
+      studentNeedsAttention(
+        student({
+          package: 'Custom',
+          custom_monthly_cost: 500,
+          custom_sessions_per_week: 2,
+          custom_session_length_min: 60,
+          schedule: WED_FRI,
+        }),
+        catalog,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('buildStatement', () => {
