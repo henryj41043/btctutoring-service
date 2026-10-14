@@ -884,6 +884,84 @@ describe('StudentsService', () => {
       });
     });
 
+    describe('package start date', () => {
+      it.each([
+        ['2026-10-15', '2026-10-15'],
+        ['2026-10-15T00:00:00', '2026-10-15T00:00:00'],
+        ['2026-10-15T04:00:00.000Z', '2026-10-15T04:00:00.000Z'],
+      ])('accepts %p and stores it as sent', async (start, stored) => {
+        Model.update.mockResolvedValue(sampleStudent());
+        await service.updateStudent(
+          sampleStudent({ package_start_date: start }),
+        );
+        const upd = Model.update.mock.calls.at(-1)![1] as Record<
+          string,
+          unknown
+        >;
+        expect(upd.package_start_date).toBe(stored);
+      });
+
+      it.each([['2026-13-40'], ['x2026-10-15'], [''], ['Oct 15'], [20261015]])(
+        'rejects the start date %p before writing',
+        async (start) => {
+          await expect(
+            service.updateStudent({
+              id: 's-1',
+              package_start_date: start,
+            } as unknown as Student),
+          ).rejects.toThrow(
+            'package_start_date must be a date (YYYY-MM-DD), or null to clear.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('rejects a start on or after the first scheduled change, sent or stored', async () => {
+        await expect(
+          service.updateStudent(
+            sampleStudent({
+              package_start_date: '2026-11-01',
+              pending_changes: [
+                { package: 'Excel', effective: '2026-12-01' },
+                { package: 'Thrive', effective: '2026-11-01' },
+              ],
+            }),
+          ),
+        ).rejects.toThrow(
+          'The package start date must be before the first scheduled change (2026-11-01).',
+        );
+        // No list sent: the stored legacy scalar change counts.
+        await expect(
+          service.updateStudent(
+            sampleStudent({
+              package_start_date: '2026-12-05T00:00:00',
+              pending_package: 'Excel',
+              pending_package_effective: '2026-12-01',
+            }),
+          ),
+        ).rejects.toThrow('(2026-12-01)');
+        expect(Model.update).not.toHaveBeenCalled();
+        // A start before the change is fine.
+        Model.update.mockResolvedValue(sampleStudent());
+        await service.updateStudent(
+          sampleStudent({
+            package_start_date: '2026-10-31',
+            pending_changes: [{ package: 'Excel', effective: '2026-11-01' }],
+          }),
+        );
+        expect(Model.update).toHaveBeenCalled();
+      });
+
+      it('createStudent validates the same field', async () => {
+        await expect(
+          service.createStudent({
+            name: 'Pat',
+            package_start_date: 'soon',
+          } as unknown as Student),
+        ).rejects.toThrow('package_start_date must be a date');
+      });
+    });
+
     describe('applyServiceEnd', () => {
       it.each([
         ['MIA', 'MIA'],
