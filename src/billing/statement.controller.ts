@@ -16,6 +16,7 @@ import { User } from '../models/user.model';
 import { Statement } from './statement-engine';
 import {
   FreezeResult,
+  RefreezeResult,
   StatementPreviewRequest,
   StatementService,
 } from './statement.service';
@@ -56,6 +57,19 @@ export class StatementController {
   ): Promise<FreezeResult> {
     this.assertAdmin(req);
     return this.statements.freezeMonth(month);
+  }
+
+  /** Replaces one family's frozen statement for a closed month with today's calculation. */
+  @Post('refreeze')
+  @HttpCode(200)
+  @UseGuards(AuthGuard('jwt'))
+  async refreeze(
+    @Request() req: express.Request,
+    @Query('month') month: string,
+    @Query('contact_id') contactId: string,
+  ): Promise<RefreezeResult> {
+    this.assertAdmin(req);
+    return this.statements.refreezeFamily(month, contactId);
   }
 
   /** The family's statement with an unsaved student change applied. */

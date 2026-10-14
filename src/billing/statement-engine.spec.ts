@@ -2,7 +2,6 @@ import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { BillingRecord } from '../models/billing-record.model';
 import { PackageCatalog } from './package-config';
-import { studentMonthlyCharge } from './billing-amount';
 import {
   applyRecords,
   buildLegacyStatement,
@@ -20,6 +19,8 @@ import {
   StatementLine,
   studentLines,
   studentNeedsAttention,
+  billingWindow,
+  serviceBounds,
 } from './statement-engine';
 
 const catalog: PackageCatalog = {
@@ -101,36 +102,18 @@ describe('date helpers', () => {
   });
 
   it('countSlotsBetween counts inclusive bounds', () => {
-    expect(countSlotsBetween(MONDAY, Y, SEP, '2026-09-01', '2026-09-30')).toBe(
-      4,
-    );
-    expect(countSlotsBetween(MONDAY, Y, SEP, '2026-09-14', '2026-09-30')).toBe(
-      3,
-    );
-    expect(countSlotsBetween(MONDAY, Y, SEP, '2026-09-15', '2026-09-30')).toBe(
-      2,
-    );
-    expect(countSlotsBetween(MONDAY, Y, SEP, '2026-09-01', '2026-09-14')).toBe(
-      2,
-    );
-    expect(countSlotsBetween(MONDAY, Y, SEP, '2026-09-01', '2026-09-13')).toBe(
-      1,
-    );
-    expect(countSlotsBetween(WED_FRI, Y, SEP, '2026-09-01', '2026-09-30')).toBe(
-      9,
-    );
-    expect(countSlotsBetween([], Y, SEP, '2026-09-01', '2026-09-30')).toBe(0);
+    expect(countSlotsBetween(MONDAY, '2026-09-01', '2026-09-30')).toBe(4);
+    expect(countSlotsBetween(MONDAY, '2026-09-14', '2026-09-30')).toBe(3);
+    expect(countSlotsBetween(MONDAY, '2026-09-15', '2026-09-30')).toBe(2);
+    expect(countSlotsBetween(MONDAY, '2026-09-01', '2026-09-14')).toBe(2);
+    expect(countSlotsBetween(MONDAY, '2026-09-01', '2026-09-13')).toBe(1);
+    expect(countSlotsBetween(WED_FRI, '2026-09-01', '2026-09-30')).toBe(9);
+    expect(countSlotsBetween([], '2026-09-01', '2026-09-30')).toBe(0);
   });
 
   it('countSlotsBetween counts two slots on the same weekday twice', () => {
     expect(
-      countSlotsBetween(
-        [...MONDAY, ...MONDAY],
-        Y,
-        SEP,
-        '2026-09-01',
-        '2026-09-30',
-      ),
+      countSlotsBetween([...MONDAY, ...MONDAY], '2026-09-01', '2026-09-30'),
     ).toBe(8);
   });
 });
@@ -265,6 +248,93 @@ describe('segmentsOf', () => {
   });
 });
 
+describe('billingWindow — the straddling weeks rule', () => {
+  it('is the calendar month when no service edge falls in a straddling week', () => {
+    expect(billingWindow({}, Y, SEP)).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(billingWindow({ start: '2026-05-01' }, Y, SEP)).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    // Mon Sep 14 is in a week entirely inside September.
+    expect(
+      billingWindow({ start: '2026-09-14', end: '2026-09-18' }, Y, SEP),
+    ).toEqual({ from: '2026-09-01', to: '2026-09-30' });
+  });
+
+  it("a start in the previous month's last week moves that week: September grows, October shrinks", () => {
+    const bounds = { start: '2026-10-01' };
+    expect(billingWindow(bounds, Y, SEP)).toEqual({
+      from: '2026-09-01',
+      to: '2026-10-03',
+    });
+    expect(billingWindow(bounds, Y, 9)).toEqual({
+      from: '2026-10-04',
+      to: '2026-10-31',
+    });
+    // A start in a week that belongs to its own month: nothing moves.
+    expect(billingWindow({ start: '2026-10-05' }, Y, SEP)).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(billingWindow({ start: '2026-10-05' }, Y, 9)).toEqual({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+  });
+
+  it("a start in the next month's first week moves that week forward", () => {
+    // Mon Aug 31 is in the Aug 30–Sep 5 week, a September week.
+    const bounds = { start: '2026-08-31' };
+    expect(billingWindow(bounds, Y, 7)).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-29',
+    });
+    expect(billingWindow(bounds, Y, SEP)).toEqual({
+      from: '2026-08-30',
+      to: '2026-09-30',
+    });
+  });
+
+  it('an end works the same way at the far side', () => {
+    // Tue Dec 1 is in the Nov 29–Dec 5 week, a December week.
+    const bounds = { start: '2026-05-01', end: '2026-12-01' };
+    expect(billingWindow(bounds, Y, 10)).toEqual({
+      from: '2026-11-01',
+      to: '2026-11-28',
+    });
+    expect(billingWindow(bounds, Y, 11)).toEqual({
+      from: '2026-11-29',
+      to: '2026-12-31',
+    });
+    // Fri Oct 2 ends in a September week: October loses Oct 1–3.
+    expect(billingWindow({ end: '2026-10-02' }, Y, SEP)).toEqual({
+      from: '2026-09-01',
+      to: '2026-10-03',
+    });
+    expect(billingWindow({ end: '2026-10-02' }, Y, 9)).toEqual({
+      from: '2026-10-04',
+      to: '2026-10-31',
+    });
+  });
+
+  it('serviceBounds reads the first start and the last end of the segments', () => {
+    expect(serviceBounds([])).toEqual({});
+    expect(
+      serviceBounds([
+        { package: 'Start', start: '2026-05-01', end: '2026-09-13' },
+        { package: 'Succeed', start: '2026-09-14', end: '2026-12-01' },
+      ]),
+    ).toEqual({ start: '2026-05-01', end: '2026-12-01' });
+    expect(serviceBounds([{ package: 'Start' }])).toEqual({
+      start: undefined,
+      end: undefined,
+    });
+  });
+});
+
 describe('segmentLine — the one proration rule', () => {
   const line = (segment: Parameters<typeof segmentLine>[0], month = SEP) =>
     segmentLine(segment, { id: 's-1', name: 'Pat' }, Y, month, catalog);
@@ -289,6 +359,49 @@ describe('segmentLine — the one proration rule', () => {
       net: 273,
       flags: [],
     });
+  });
+
+  it('bills the days of the window it is given, not the calendar month', () => {
+    const window = { from: '2026-09-01', to: '2026-10-03' };
+    expect(
+      segmentLine(
+        { package: 'Succeed', start: '2026-10-01', schedule: WED_FRI },
+        { id: 's-1', name: 'Pat' },
+        Y,
+        SEP,
+        catalog,
+        window,
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        from: '2026-10-01',
+        to: '2026-10-03',
+        sessions_billed: 1,
+        sessions_in_month: 10,
+        amount: 52.62,
+        flags: ['prorated_start'],
+      }),
+    );
+    // A continuing segment fills a shortened window and is still full.
+    expect(
+      segmentLine(
+        { package: 'Start', start: '2026-05-01', schedule: MONDAY },
+        { id: 's-1', name: 'Pat' },
+        Y,
+        9,
+        catalog,
+        { from: '2026-10-04', to: '2026-10-31' },
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        from: '2026-10-04',
+        to: '2026-10-31',
+        sessions_billed: 4,
+        sessions_in_month: 4,
+        amount: 273,
+        flags: [],
+      }),
+    );
   });
 
   it('a segment outside the month contributes nothing', () => {
@@ -666,6 +779,42 @@ describe('studentLines', () => {
     expect(lines[0].flags).toEqual(['prorated_start']);
   });
 
+  it('a package change on the 1st never pulls the old package into the next month', () => {
+    // Service began in May: neither service edge is near September, so the
+    // Aug 30–Sep 5 week (a September week) changes nothing here.
+    const s = student({
+      package: 'Succeed',
+      package_start_date: '2026-09-01T00:00:00',
+      schedule: WED_FRI,
+      package_history: [
+        {
+          package: 'Start',
+          start: '2026-05-01',
+          end: '2026-08-31',
+          schedule: MONDAY,
+        },
+      ],
+    });
+    expect(studentLines(s, Y, 7, catalog)).toEqual([
+      expect.objectContaining({
+        package: 'Start',
+        from: '2026-08-01',
+        to: '2026-08-31',
+        amount: 273,
+        flags: [],
+      }),
+    ]);
+    expect(studentLines(s, Y, SEP, catalog)).toEqual([
+      expect.objectContaining({
+        package: 'Succeed',
+        from: '2026-09-01',
+        to: '2026-09-30',
+        amount: 456,
+        flags: [],
+      }),
+    ]);
+  });
+
   it('history keeps a past month on its old package', () => {
     const s = student({
       package: 'Succeed',
@@ -728,7 +877,6 @@ describe('studentLines', () => {
         }),
       );
       expect(statementFor([rj]).total).toBe(425.8);
-      expect(studentMonthlyCharge(rj, Y, SEP, catalog)).toBe(425.8);
     });
 
     it('applies to its own month only', () => {
@@ -799,49 +947,87 @@ describe('splitKindOf', () => {
     }) as StatementLine;
 
   it('no lines or a full month split evenly', () => {
-    expect(splitKindOf([])).toBe('split');
-    expect(splitKindOf([l({})])).toBe('split');
+    expect(splitKindOf([], Y, SEP)).toBe('split');
+    expect(splitKindOf([l({})], Y, SEP)).toBe('split');
   });
 
   it('a prorated start on or after the 15th lands on the 15th', () => {
     expect(
-      splitKindOf([l({ from: '2026-09-15', flags: ['prorated_start'] })]),
+      splitKindOf(
+        [l({ from: '2026-09-15', flags: ['prorated_start'] })],
+        Y,
+        SEP,
+      ),
     ).toBe('fifteenth');
     expect(
-      splitKindOf([l({ from: '2026-09-14', flags: ['prorated_start'] })]),
+      splitKindOf(
+        [l({ from: '2026-09-14', flags: ['prorated_start'] })],
+        Y,
+        SEP,
+      ),
     ).toBe('split');
     // A full month that merely starts late is not prorated.
-    expect(splitKindOf([l({ from: '2026-09-15' })])).toBe('split');
+    expect(splitKindOf([l({ from: '2026-09-15' })], Y, SEP)).toBe('split');
   });
 
   it('a prorated ending before the 15th lands on the 1st', () => {
     expect(
-      splitKindOf([l({ to: '2026-09-14', flags: ['prorated_end'] })]),
+      splitKindOf([l({ to: '2026-09-14', flags: ['prorated_end'] })], Y, SEP),
     ).toBe('first');
     expect(
-      splitKindOf([l({ to: '2026-09-15', flags: ['prorated_end'] })]),
+      splitKindOf([l({ to: '2026-09-15', flags: ['prorated_end'] })], Y, SEP),
     ).toBe('split');
-    expect(splitKindOf([l({ to: '2026-09-14' })])).toBe('split');
+    expect(splitKindOf([l({ to: '2026-09-14' })], Y, SEP)).toBe('split');
+  });
+
+  it('compares with the statement month, not the day number', () => {
+    // A December line that starts Nov 29 (a December week) is before Dec 15.
+    expect(
+      splitKindOf(
+        [l({ from: '2026-11-29', to: '2026-12-01', flags: ['prorated_end'] })],
+        Y,
+        11,
+      ),
+    ).toBe('first');
+    expect(
+      splitKindOf(
+        [l({ from: '2026-11-29', flags: ['prorated_start'] })],
+        Y,
+        11,
+      ),
+    ).toBe('split');
   });
 
   it('reads the first line for starts and the last for endings', () => {
     expect(
-      splitKindOf([
-        l({ from: '2026-09-02', flags: ['prorated_start'] }),
-        l({ from: '2026-09-20', to: '2026-09-30' }),
-      ]),
+      splitKindOf(
+        [
+          l({ from: '2026-09-02', flags: ['prorated_start'] }),
+          l({ from: '2026-09-20', to: '2026-09-30' }),
+        ],
+        Y,
+        SEP,
+      ),
     ).toBe('split');
     expect(
-      splitKindOf([
-        l({ to: '2026-09-05' }),
-        l({ from: '2026-09-06', to: '2026-09-10', flags: ['prorated_end'] }),
-      ]),
+      splitKindOf(
+        [
+          l({ to: '2026-09-05' }),
+          l({ from: '2026-09-06', to: '2026-09-10', flags: ['prorated_end'] }),
+        ],
+        Y,
+        SEP,
+      ),
     ).toBe('first');
     expect(
-      splitKindOf([
-        l({ to: '2026-09-05', flags: ['prorated_end'] }),
-        l({ from: '2026-09-06' }),
-      ]),
+      splitKindOf(
+        [
+          l({ to: '2026-09-05', flags: ['prorated_end'] }),
+          l({ from: '2026-09-06' }),
+        ],
+        Y,
+        SEP,
+      ),
     ).toBe('split');
   });
 });
@@ -882,8 +1068,21 @@ describe('isBillableInMonth', () => {
     ).toBe(true);
     // Still Active but already past the end date: not billable.
     expect(
-      isBillableInMonth(student({ service_end_date: '2026-08-31' }), Y, SEP),
+      isBillableInMonth(student({ service_end_date: '2026-08-28' }), Y, SEP),
     ).toBe(false);
+  });
+
+  it('an end whose week belongs to the next month keeps the student on that month', () => {
+    // Mon Aug 31 sits in the Aug 30–Sep 5 week, a September week.
+    const ending = student({ service_end_date: '2026-08-31' });
+    expect(isBillableInMonth(ending, Y, 7)).toBe(true);
+    expect(isBillableInMonth(ending, Y, SEP)).toBe(true);
+    expect(isBillableInMonth(ending, Y, 9)).toBe(false);
+    // Mon Nov 30 sits in the Nov 29–Dec 5 week, a December week.
+    const nov = student({ service_end_date: '2026-11-30' });
+    expect(isBillableInMonth(nov, Y, 10)).toBe(true);
+    expect(isBillableInMonth(nov, Y, 11)).toBe(true);
+    expect(isBillableInMonth(nov, 2027, 0)).toBe(false);
   });
 });
 
@@ -999,16 +1198,100 @@ describe('buildStatement', () => {
   });
 
   it('returns null when the month bills nothing', () => {
+    // Mon Oct 5 is in the Oct 4–10 week: nothing of it is September's.
     expect(
       buildStatement(
         contact(),
-        [student({ package_start_date: '2026-10-01T00:00:00' })],
+        [student({ package_start_date: '2026-10-05T00:00:00' })],
         [],
         Y,
         SEP,
         catalog,
       ),
     ).toBeNull();
+  });
+
+  it("a start inside September's last week bills that week on September, then October in full (client example)", () => {
+    // Thu Oct 1 2026: the Sept 27–Oct 3 week has 4 days in September.
+    const starter = student({
+      package: 'Succeed',
+      package_start_date: '2026-10-01T00:00:00',
+      schedule: WED_FRI,
+    });
+    const sept = statementFor([starter]);
+    expect(sept.lines).toEqual([
+      expect.objectContaining({
+        package: 'Succeed',
+        from: '2026-10-01',
+        to: '2026-10-03',
+        sessions_billed: 1, // Fri Oct 2
+        sessions_in_month: 10,
+        rate: 52.62,
+        amount: 52.62,
+        flags: ['prorated_start'],
+      }),
+    ]);
+    expect(sept.total).toBe(52.62);
+    const oct = statementFor([starter], contact(), [], 9);
+    expect(oct.lines).toEqual([
+      expect.objectContaining({
+        from: '2026-10-04',
+        to: '2026-10-31',
+        sessions_billed: 8,
+        sessions_in_month: 8,
+        amount: 456,
+        flags: [],
+      }),
+    ]);
+    expect(oct.total).toBe(456);
+  });
+
+  it('an end inside a week owned by the next month bills that week there; the month before is full', () => {
+    // Tue Dec 1 2026: the Nov 29–Dec 5 week has 5 days in December.
+    const leaver = student({
+      status: 'Past Student',
+      service_end_date: '2026-12-01',
+    });
+    const nov = statementFor([leaver], contact(), [], 10);
+    expect(nov.lines).toEqual([
+      expect.objectContaining({
+        from: '2026-11-01',
+        to: '2026-11-28',
+        sessions_billed: 4,
+        sessions_in_month: 4,
+        amount: 273,
+        flags: [],
+      }),
+    ]);
+    const dec = statementFor([leaver], contact(), [], 11);
+    expect(dec.lines).toEqual([
+      expect.objectContaining({
+        from: '2026-11-29',
+        to: '2026-12-01',
+        sessions_billed: 1, // Mon Nov 30
+        amount: 63,
+        flags: ['prorated_end'],
+      }),
+    ]);
+    expect(dec.total).toBe(63);
+    expect(dec.dues.map((d) => d.amount)).toEqual([63]);
+  });
+
+  it('a semi-monthly family with a last week in the previous month pays it on the 1st', () => {
+    const leaver = student({
+      status: 'Past Student',
+      service_end_date: '2026-12-01',
+    });
+    const dec = statementFor(
+      [leaver],
+      contact({ billing_cycle: 'semi_monthly' }),
+      [],
+      11,
+    );
+    expect(dec.dues.map((d) => [d.day, d.amount])).toEqual([
+      [1, 63],
+      [15, 0],
+    ]);
   });
 
   it('an unpriced family still gets a $0 statement that needs attention', () => {
@@ -1380,77 +1663,6 @@ describe('buildStatements', () => {
         catalog,
       ),
     ).toEqual([]);
-  });
-});
-
-describe('parity with the v1 formulas', () => {
-  const cases: [string, Partial<Student>][] = [
-    ['ongoing', {}],
-    ['legacy, no start date', { package_start_date: undefined }],
-    ['starts on the 1st', { package_start_date: '2026-09-01T00:00:00' }],
-    ['starts in the first week', { package_start_date: '2026-09-04T00:00:00' }],
-    ['starts mid-month', { package_start_date: '2026-09-14T00:00:00' }],
-    [
-      'starts after the last slot',
-      { package_start_date: '2026-09-29T00:00:00' },
-    ],
-    ['starts next month', { package_start_date: '2026-10-05T00:00:00' }],
-    [
-      'no schedule',
-      { package_start_date: '2026-09-14T00:00:00', schedule: [] },
-    ],
-    ['two sessions a week', { package: 'Succeed', schedule: WED_FRI }],
-    [
-      'two a week, mid-month',
-      {
-        package: 'Succeed',
-        schedule: WED_FRI,
-        package_start_date: '2026-09-11T00:00:00',
-      },
-    ],
-    [
-      'custom',
-      {
-        package: 'Custom',
-        custom_monthly_cost: 410.4,
-        custom_sessions_per_week: 2,
-        custom_session_length_min: 45,
-        schedule: WED_FRI,
-        package_start_date: '2026-09-16T00:00:00',
-      },
-    ],
-    ['unconfigured custom', { package: 'Custom' }],
-    [
-      'scheduled change next month',
-      { pending_changes: [{ package: 'Succeed', effective: '2026-10-01' }] },
-    ],
-    [
-      'scheduled change this month',
-      { pending_changes: [{ package: 'Succeed', effective: '2026-09-01' }] },
-    ],
-    [
-      'mid-month change',
-      {
-        package: 'Succeed',
-        schedule: WED_FRI,
-        package_start_date: '2026-09-14T00:00:00',
-        mid_month_change_period: '2026-09',
-        mid_month_prior_charge: 63,
-      },
-    ],
-  ];
-
-  it.each(cases)('%s', (_name, overrides) => {
-    const s = student(overrides);
-    for (const month of [7, 8, 9, 10]) {
-      const lines = studentLines(s, Y, month, catalog);
-      const total =
-        Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
-      expect([month, total]).toEqual([
-        month,
-        studentMonthlyCharge(s, Y, month, catalog),
-      ]);
-    }
   });
 });
 

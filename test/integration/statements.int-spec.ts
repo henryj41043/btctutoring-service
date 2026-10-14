@@ -135,6 +135,42 @@ describe('Billing statements (integration)', () => {
     expect(Students.__save).not.toHaveBeenCalled();
   });
 
+  it("admin re-freezes one family's closed month; others are refused", async () => {
+    scanResolves(Billing, []);
+    Billing.create.mockResolvedValue({});
+    const res = await request(server())
+      .post('/billing/statements/refreeze?month=2026-09&contact_id=c-1')
+      .set('x-test-role', 'admin');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      month: '2026-09',
+      contact_id: 'c-1',
+      replaced: true,
+    });
+    expect(Billing.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'stmt#c-1#2026-09',
+        statement_month: '2026-09',
+      }),
+      { overwrite: true },
+    );
+    // A month the family does not bill leaves the stored copy alone.
+    const empty = await request(server())
+      .post('/billing/statements/refreeze?month=2026-01&contact_id=c-1')
+      .set('x-test-role', 'admin');
+    expect(empty.status).toBe(200);
+    expect(empty.body.replaced).toBe(false);
+    expect(Billing.create).toHaveBeenCalledTimes(1);
+    const tutor = await request(server())
+      .post('/billing/statements/refreeze?month=2026-09&contact_id=c-1')
+      .set('x-test-role', 'tutor');
+    expect(tutor.status).toBe(403);
+    const open = await request(server())
+      .post('/billing/statements/refreeze?month=2999-01&contact_id=c-1')
+      .set('x-test-role', 'admin');
+    expect(open.status).toBe(400);
+  });
+
   it('admin freezes a closed month, then reads it back frozen', async () => {
     scanResolves(Billing, []);
     Billing.create.mockResolvedValue({});
