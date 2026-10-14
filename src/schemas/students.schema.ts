@@ -132,6 +132,9 @@ export const StudentsSchema = new dynamoose.Schema({
   // applies once it has passed.
   service_end_date: String,
   end_status: String,
+  // The end date the admins were reminded about (two weeks ahead); a moved
+  // end date no longer matches and is announced again.
+  end_reminder_sent: String,
   // Billing v2: per-student monthly price and discount percent (any package).
   price_override: Number,
   discount_percent: Number,

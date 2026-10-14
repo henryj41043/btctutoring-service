@@ -1357,6 +1357,24 @@ describe('StudentsService', () => {
     });
   });
 
+  describe('markServiceEndReminderSent', () => {
+    it('stamps the end date the reminder went out for', async () => {
+      Model.update.mockResolvedValue(undefined);
+      await service.markServiceEndReminderSent(sampleStudent(), '2026-10-28');
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'student-1' },
+        { $SET: { end_reminder_sent: '2026-10-28' } },
+      );
+    });
+
+    it('rejects when the write fails', async () => {
+      Model.update.mockRejectedValue(new Error('ddb down'));
+      await expect(
+        service.markServiceEndReminderSent(sampleStudent(), '2026-10-28'),
+      ).rejects.toThrow('ddb down');
+    });
+  });
+
   describe('markPendingChangeNoticeSent', () => {
     it('stamps the matching entry, rewriting the list and removing legacy scalars', async () => {
       Model.update.mockResolvedValue(undefined);

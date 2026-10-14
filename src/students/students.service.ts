@@ -687,6 +687,20 @@ export class StudentsService {
     });
   }
 
+  /** Records that the admins were reminded about this end date. */
+  async markServiceEndReminderSent(
+    student: Student,
+    endDate: string,
+  ): Promise<void> {
+    await StudentsModel.update(
+      { id: student.id },
+      { $SET: { end_reminder_sent: endDate } },
+    ).catch((error: Error) => {
+      Logger.error(error.message, error);
+      return Promise.reject(error);
+    });
+  }
+
   /**
    * Applies every scheduled change due on or before `dayKey` ('YYYY-MM-DD')
    * in one write (see applyPromotion): the closed package goes to
