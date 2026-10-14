@@ -152,6 +152,26 @@ describe('ScholarshipsService', () => {
       expect(attrs.id).toBe('contact-1#2026-08');
     });
 
+    it("stores 'N/A' for a request date and drops the date itself", async () => {
+      Model.__save.mockResolvedValue(undefined);
+      await service.upsertScholarshipRecord(
+        sampleRecord({
+          funds_requested_by_btc_na: true,
+          date_funds_requested_by_btc: new Date('2026-08-02'),
+          funds_requested_by_family_na: false,
+          date_funds_requested_by_family: new Date('2026-08-05'),
+        }),
+      );
+      const attrs = (Model as unknown as jest.Mock).mock.calls.at(-1)![0];
+      expect(attrs.funds_requested_by_btc_na).toBe(true);
+      expect(attrs).not.toHaveProperty('date_funds_requested_by_btc');
+      // false is stripped like any cleared field; the date stays.
+      expect(attrs).not.toHaveProperty('funds_requested_by_family_na');
+      expect(attrs.date_funds_requested_by_family).toEqual(
+        new Date('2026-08-05'),
+      );
+    });
+
     it('coerces string and epoch dates to real Dates (non-HTTP callers)', async () => {
       Model.__save.mockResolvedValue(undefined);
       await service.upsertScholarshipRecord(

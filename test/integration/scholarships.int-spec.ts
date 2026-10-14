@@ -63,6 +63,35 @@ describe('Scholarships (integration)', () => {
     expect(Model.__save).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts 'N/A' for a request date and refuses a non-boolean", async () => {
+    const res = await request(server())
+      .post('/scholarships')
+      .set('x-test-role', 'admin')
+      .send({
+        contact_id: 'c-1',
+        month: '2026-09',
+        funds_requested_by_btc_na: true,
+        date_funds_requested_by_btc: '2026-09-02T04:00:00.000Z',
+        date_funds_requested_by_family: '2026-09-05T04:00:00.000Z',
+      });
+    expect(res.status).toBe(201);
+    const attrs = saved();
+    expect(attrs.funds_requested_by_btc_na).toBe(true);
+    expect('date_funds_requested_by_btc' in attrs).toBe(false);
+    expect(attrs.date_funds_requested_by_family).toBeInstanceOf(Date);
+
+    const bad = await request(server())
+      .post('/scholarships')
+      .set('x-test-role', 'admin')
+      .send({
+        contact_id: 'c-1',
+        month: '2026-09',
+        funds_requested_by_family_na: 'yes',
+      });
+    expect(bad.status).toBe(400);
+    expect(Model.__save).toHaveBeenCalledTimes(1);
+  });
+
   it('drops null dates (cleared fields) instead of failing', async () => {
     const res = await request(server())
       .post('/scholarships')
