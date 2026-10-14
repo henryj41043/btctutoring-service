@@ -13,6 +13,9 @@ export const ScholarshipsSchema = new dynamoose.Schema({
   invoice_Month: String,
   date_funds_requested_by_btc: Date,
   date_funds_requested_by_family: Date,
+  // 'N/A' for the two request dates: no request will be made.
+  funds_requested_by_btc_na: Boolean,
+  funds_requested_by_family_na: Boolean,
   invoice_number: String,
   invoice_paid_date: Date,
 });

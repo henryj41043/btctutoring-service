@@ -106,12 +106,16 @@ export class ScholarshipsService {
       month: record.month,
       scholarship_state: record.scholarship_state,
       invoice_Month: record.invoice_Month,
-      date_funds_requested_by_btc: ScholarshipsService.toDate(
-        record.date_funds_requested_by_btc,
-      ),
-      date_funds_requested_by_family: ScholarshipsService.toDate(
-        record.date_funds_requested_by_family,
-      ),
+      // 'N/A' and a date cannot both hold: N/A wins and the date is dropped.
+      date_funds_requested_by_btc: record.funds_requested_by_btc_na
+        ? undefined
+        : ScholarshipsService.toDate(record.date_funds_requested_by_btc),
+      date_funds_requested_by_family: record.funds_requested_by_family_na
+        ? undefined
+        : ScholarshipsService.toDate(record.date_funds_requested_by_family),
+      funds_requested_by_btc_na: record.funds_requested_by_btc_na || undefined,
+      funds_requested_by_family_na:
+        record.funds_requested_by_family_na || undefined,
       invoice_number: record.invoice_number,
       invoice_paid_date: ScholarshipsService.toDate(record.invoice_paid_date),
     };

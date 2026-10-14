@@ -1,4 +1,4 @@
-import { IsDate, IsOptional } from 'class-validator';
+import { IsBoolean, IsDate, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /**
@@ -27,6 +27,13 @@ export class ScholarshipRecord {
   @Type(() => Date)
   @IsDate()
   date_funds_requested_by_family?: Date;
+  /** 'N/A': no request by BTC (resp. the family) for this month; the date is dropped. */
+  @IsOptional()
+  @IsBoolean()
+  funds_requested_by_btc_na?: boolean;
+  @IsOptional()
+  @IsBoolean()
+  funds_requested_by_family_na?: boolean;
   invoice_number?: string;
   @IsOptional()
   @Type(() => Date)
