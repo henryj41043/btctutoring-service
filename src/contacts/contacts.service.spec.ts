@@ -334,6 +334,67 @@ describe('ContactsService', () => {
     });
   });
 
+  describe('billing cycle and weekday', () => {
+    beforeEach(() => {
+      scanResolves(Model, []);
+      Model.__save.mockResolvedValue(undefined);
+      Model.update.mockResolvedValue(sampleContact());
+    });
+
+    it('saves a weekly family with its weekday, on create and update', async () => {
+      await service.createContact(
+        sampleContact({ billing_cycle: 'weekly', billing_weekday: 'FRIDAY' }),
+      );
+      expect(Model).toHaveBeenCalledWith(
+        expect.objectContaining({
+          billing_cycle: 'weekly',
+          billing_weekday: 'FRIDAY',
+        }),
+      );
+      await service.updateContact(
+        sampleContact({ billing_cycle: 'weekly', billing_weekday: 'MONDAY' }),
+      );
+      expect(Model.update).toHaveBeenCalledWith(
+        { id: 'contact-1' },
+        expect.objectContaining({
+          billing_cycle: 'weekly',
+          billing_weekday: 'MONDAY',
+        }),
+      );
+    });
+
+    it('refuses a weekly family without a weekday, and a weekday that is not a day', async () => {
+      await expect(
+        service.updateContact(sampleContact({ billing_cycle: 'weekly' })),
+      ).rejects.toThrow(
+        'A weekly billing cycle needs the weekday the family is billed on.',
+      );
+      await expect(
+        service.updateContact(
+          sampleContact({ billing_cycle: 'weekly', billing_weekday: 'Fri' }),
+        ),
+      ).rejects.toThrow('billing_weekday must be one of: SUNDAY, MONDAY');
+      await expect(
+        service.createContact(sampleContact({ billing_cycle: 'fortnightly' })),
+      ).rejects.toThrow('billing_cycle must be one of: monthly, semi_monthly');
+      expect(Model.update).not.toHaveBeenCalled();
+      expect(Model.__save).not.toHaveBeenCalled();
+    });
+
+    it('still accepts the legacy cycles and an empty one', async () => {
+      for (const cycle of [
+        'custom',
+        'biweekly',
+        'semi_monthly',
+        '',
+        undefined,
+      ]) {
+        await service.updateContact(sampleContact({ billing_cycle: cycle }));
+      }
+      expect(Model.update).toHaveBeenCalledTimes(5);
+    });
+  });
+
   describe('updateContact', () => {
     it('updates and returns the contact', async () => {
       const updated = sampleContact({ first_name: 'Grace' });
