@@ -1,8 +1,23 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { ContactsModel } from '../models/contacts.model';
 import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
+import { WEEKDAY_BY_JS_DAY } from '../sessions/session-builder';
+
+/** Billing cycles a contact may carry ('biweekly' and 'custom' are legacy). */
+export const BILLING_CYCLES = [
+  'monthly',
+  'semi_monthly',
+  'weekly',
+  'biweekly',
+  'custom',
+];
 
 /** The slice of a DocumentClient scan page the summary listing consumes. */
 interface SummaryScanPage {
@@ -144,7 +159,43 @@ export class ContactsService {
     return contacts.find((c) => c.email?.trim().toLowerCase() === normalized);
   }
 
+  /**
+   * Rejects an unknown billing cycle, and a weekly family without a valid
+   * weekday, before anything is written. 'biweekly' and 'custom' are legacy
+   * values the statement engine reads as semi-monthly and monthly.
+   */
+  private assertBilling(contact: Contact): void {
+    const cycle = contact.billing_cycle;
+    if (
+      cycle !== undefined &&
+      cycle !== null &&
+      cycle !== '' &&
+      !BILLING_CYCLES.includes(cycle)
+    ) {
+      throw new BadRequestException(
+        `billing_cycle must be one of: ${BILLING_CYCLES.join(', ')}.`,
+      );
+    }
+    const weekday = contact.billing_weekday;
+    if (
+      weekday !== undefined &&
+      weekday !== null &&
+      weekday !== '' &&
+      !WEEKDAY_BY_JS_DAY.includes(weekday)
+    ) {
+      throw new BadRequestException(
+        `billing_weekday must be one of: ${WEEKDAY_BY_JS_DAY.join(', ')}.`,
+      );
+    }
+    if (cycle === 'weekly' && !weekday) {
+      throw new BadRequestException(
+        'A weekly billing cycle needs the weekday the family is billed on.',
+      );
+    }
+  }
+
   async createContact(contact: Contact) {
+    this.assertBilling(contact);
     if (contact.email && (await this.findByEmail(contact.email))) {
       throw new ConflictException('A contact with this email already exists.');
     }
@@ -163,6 +214,7 @@ export class ContactsService {
       service: contact.service,
       status: contact.status,
       billing_cycle: contact.billing_cycle,
+      billing_weekday: contact.billing_weekday,
       sibling_discount: contact.sibling_discount,
       cc_authorization_received: contact.cc_authorization_received,
       twenty_five_deducted: contact.twenty_five_deducted,
@@ -238,6 +290,7 @@ export class ContactsService {
   }
 
   async updateContact(contact: Contact) {
+    this.assertBilling(contact);
     // Same uniqueness rule as create: an edit must not collide two contacts
     // onto one email (the record being edited may of course keep its own).
     if (contact.email) {
@@ -265,6 +318,7 @@ export class ContactsService {
         service: contact.service,
         status: contact.status,
         billing_cycle: contact.billing_cycle,
+        billing_weekday: contact.billing_weekday,
         sibling_discount: contact.sibling_discount,
         cc_authorization_received: contact.cc_authorization_received,
         twenty_five_deducted: contact.twenty_five_deducted,

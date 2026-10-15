@@ -13,10 +13,11 @@ import {
   perSessionCost,
   resolvePackageDef,
   round2,
+  weeklyCost,
 } from './package-config';
 import { GROUP_MONTHLY_FEE, siblingDiscountedTotal } from './billing-amount';
 import { dateKey, dayBefore, keyOf } from './eastern-time';
-import { addDays, billingMonthOf, weekOf } from './billing-weeks';
+import { addDays, billingMonthOf, billingSpan, weekOf } from './billing-weeks';
 
 export { dateKey, dayBefore, keyOf };
 
@@ -92,6 +93,26 @@ export interface StatementLine {
   /** The charge after the student discount. */
   net: number;
   flags: LineFlag[];
+  /** Weekly families: the line's charge per Sunday–Saturday week. */
+  weeks?: LineWeek[];
+}
+
+/** One week of a weekly family's line. */
+export interface LineWeek {
+  /** The week's Sunday, 'YYYY-MM-DD'. */
+  week_start: string;
+  sessions: number;
+  /** Per session, capped at the weekly price; the weekly price for a full week. */
+  amount: number;
+}
+
+export type BillingCycle = 'monthly' | 'semi_monthly' | 'weekly';
+
+/** The stored billing_cycle as the engine reads it (legacy values folded in). */
+export function cycleOf(cycle: string | undefined | null): BillingCycle {
+  if (cycle === 'semi_monthly' || cycle === 'biweekly') return 'semi_monthly';
+  if (cycle === 'weekly') return 'weekly';
+  return 'monthly';
 }
 
 export interface StatementDue {
@@ -114,7 +135,7 @@ export interface Statement {
   contact_name: string;
   /** 'YYYY-MM' */
   month: string;
-  cycle: 'monthly' | 'semi_monthly';
+  cycle: BillingCycle;
   lines: StatementLine[];
   /** Package charges before any discount. */
   package_gross: number;
@@ -295,6 +316,7 @@ export function segmentLine(
   month: number,
   catalog: PackageCatalog,
   window: { from: string; to: string } = billingWindow({}, year, month),
+  weekly: boolean = false,
 ): StatementLine | null {
   const windowStart = window.from;
   const windowEnd = window.to;
@@ -348,7 +370,19 @@ export function segmentLine(
   // Without a schedule the sessions can't be counted: bill the full month
   // rather than $0 (the statement is flagged for attention).
   const full = schedule.length === 0 || billed >= inMonth;
-  const amount = full ? monthly : Math.min(monthly, round2(rate * billed));
+  // A weekly family is charged week by week: per session, capped at the
+  // weekly price (a full week is the weekly price); the line is their sum.
+  const weeks = weekly
+    ? lineWeeks(segment, schedule, from, to, rate, {
+        ...def,
+        monthlyCost: monthly,
+      })
+    : undefined;
+  const amount = weeks
+    ? round2(weeks.reduce((sum, w) => sum + w.amount, 0))
+    : full
+      ? monthly
+      : Math.min(monthly, round2(rate * billed));
 
   const flags: LineFlag[] = [];
   if (!full && from > windowStart) flags.push('prorated_start');
@@ -364,9 +398,48 @@ export function segmentLine(
       monthly_price: monthly,
       amount,
       flags,
+      ...(weeks ? { weeks } : {}),
     },
     segment.discount_percent,
   );
+}
+
+/** A line's charge per Sunday–Saturday week between two dates (weekly families). */
+function lineWeeks(
+  segment: ServiceSegment,
+  schedule: ScheduleSlot[],
+  from: string,
+  to: string,
+  rate: number,
+  def: {
+    monthlyCost: number;
+    sessionsPerWeek: number;
+    sessionLengthMin: number;
+  },
+): LineWeek[] {
+  const weekly = weeklyCost(def);
+  const weeks: LineWeek[] = [];
+  for (
+    let sunday = weekOf(from).sunday;
+    sunday <= to;
+    sunday = addDays(sunday, 7)
+  ) {
+    const wFrom = sunday > from ? sunday : from;
+    const saturday = addDays(sunday, 6);
+    const wTo = saturday < to ? saturday : to;
+    const oneOff = (segment.first_week_sessions ?? []).filter(
+      (s) =>
+        !!s && typeof s.date === 'string' && s.date >= wFrom && s.date <= wTo,
+    ).length;
+    const sessions = countSlotsBetween(schedule, wFrom, wTo) + oneOff;
+    // No schedule: the week cannot be counted, so it bills the weekly price.
+    const amount =
+      schedule.length === 0
+        ? weekly
+        : Math.min(weekly, round2(rate * sessions));
+    weeks.push({ week_start: sunday, sessions, amount });
+  }
+  return weeks;
 }
 
 /** Applies a student discount percent to a line. */
@@ -397,6 +470,7 @@ export function studentLines(
   year: number,
   month: number,
   catalog: PackageCatalog,
+  cycle: BillingCycle = 'monthly',
 ): StatementLine[] {
   const lines: StatementLine[] = [];
   const monthKey = `${year}-${pad(month + 1)}`;
@@ -434,9 +508,22 @@ export function studentLines(
   }
 
   const segments = segmentsOf(student);
-  const window = billingWindow(serviceBounds(segments), year, month);
+  // A weekly family's month is its billing weeks, start to finish; the
+  // straddling-weeks rule then holds for every week, not only the two ends.
+  const weekly = cycle === 'weekly';
+  const window = weekly
+    ? billingSpan(year, month)
+    : billingWindow(serviceBounds(segments), year, month);
   for (const segment of segments) {
-    const line = segmentLine(segment, student, year, month, catalog, window);
+    const line = segmentLine(
+      segment,
+      student,
+      year,
+      month,
+      catalog,
+      window,
+      weekly,
+    );
     if (line) lines.push(line);
   }
 
@@ -525,9 +612,6 @@ export function studentNeedsAttention(
   );
 }
 
-const isSemiMonthly = (cycle: string | undefined): boolean =>
-  cycle === 'semi_monthly' || cycle === 'biweekly';
-
 /**
  * One family's statement for a month; null when nothing is billable. A
  * family whose students are all on a $0 package still gets a statement
@@ -550,10 +634,11 @@ export function buildStatement(
   if (billable.length === 0) return null;
 
   const packaged = billable.filter((s) => !!s.package);
+  const cycle = cycleOf(contact.billing_cycle);
   const lines: StatementLine[] = [];
   let rawFirst = 0;
   for (const student of packaged) {
-    const own = studentLines(student, year, month, catalog);
+    const own = studentLines(student, year, month, catalog, cycle);
     lines.push(...own);
     const net = own.reduce((sum, l) => sum + l.net, 0);
     const kind = splitKindOf(own, year, month);
@@ -573,27 +658,42 @@ export function buildStatement(
     packaged.length,
   );
   const siblingAmount = round2(subtotal - discounted);
-  const total = round2(discounted + groupFee);
+  let total = round2(discounted + groupFee);
 
-  const semi = isSemiMonthly(contact.billing_cycle);
-  const derived: { day: number; amount: number }[] = [];
-  if (semi) {
-    const first = subtotal > 0 ? round2((discounted * rawFirst) / subtotal) : 0;
-    // The flat group fee lands on the 1st for semi-monthly families.
-    derived.push({ day: 1, amount: round2(first + groupFee) });
-    derived.push({ day: 15, amount: round2(discounted - first) });
+  let dues: StatementDue[];
+  let weekdayMissing = false;
+  if (cycle === 'weekly') {
+    const weekday = WEEKDAY_BY_JS_DAY.indexOf(contact.billing_weekday ?? '');
+    weekdayMissing = weekday < 0;
+    dues = weeklyDues(
+      lines,
+      weekdayMissing ? 6 : weekday,
+      subtotal > 0 ? discounted / subtotal : 1,
+      groupFee,
+      year,
+      month,
+    );
+    total = round2(dues.reduce((sum, d) => sum + d.derived, 0));
   } else {
-    derived.push({ day: 1, amount: total });
+    const derived: { day: number; amount: number }[] = [];
+    if (cycle === 'semi_monthly') {
+      const first =
+        subtotal > 0 ? round2((discounted * rawFirst) / subtotal) : 0;
+      // The flat group fee lands on the 1st for semi-monthly families.
+      derived.push({ day: 1, amount: round2(first + groupFee) });
+      derived.push({ day: 15, amount: round2(discounted - first) });
+    } else {
+      derived.push({ day: 1, amount: total });
+    }
+    dues = derived.map(({ day, amount }) => ({
+      day,
+      period_start: dateKey(year, month, day),
+      derived: amount,
+      override: null,
+      amount,
+      paid: false,
+    }));
   }
-
-  const dues: StatementDue[] = derived.map(({ day, amount }) => ({
-    day,
-    period_start: dateKey(year, month, day),
-    derived: amount,
-    override: null,
-    amount,
-    paid: false,
-  }));
 
   const flags: LineFlag[] = [];
   for (const line of lines) {
@@ -609,7 +709,7 @@ export function buildStatement(
       contact_name:
         `${contact.first_name ?? ''} ${contact.last_name ?? ''}`.trim(),
       month: `${year}-${pad(month + 1)}`,
-      cycle: semi ? 'semi_monthly' : 'monthly',
+      cycle,
       lines,
       package_gross: gross,
       package_subtotal: subtotal,
@@ -622,10 +722,58 @@ export function buildStatement(
       dues,
       total_due: round2(dues.reduce((sum, d) => sum + d.amount, 0)),
       flags,
-      needs_attention: packaged.some((s) => studentNeedsAttention(s, catalog)),
+      needs_attention:
+        weekdayMissing ||
+        packaged.some((s) => studentNeedsAttention(s, catalog)),
     },
     records,
   );
+}
+
+/**
+ * A weekly family's dues: one per billing week with something to bill,
+ * dated on the family's weekday inside that week. Each week sums the lines'
+ * week charges after the student discounts, scaled by the sibling discount;
+ * the flat group fee rides on the first due. Weeks with no sessions and no
+ * charge are left out, so a $0 package still shows its weeks.
+ */
+export function weeklyDues(
+  lines: StatementLine[],
+  weekday: number,
+  siblingRatio: number,
+  groupFee: number,
+  year: number,
+  month: number,
+): StatementDue[] {
+  const byWeek = new Map<string, { sessions: number; net: number }>();
+  for (const line of lines) {
+    const ratio = line.amount > 0 ? line.net / line.amount : 0;
+    for (const week of line.weeks ?? []) {
+      const entry = byWeek.get(week.week_start) ?? { sessions: 0, net: 0 };
+      entry.sessions += week.sessions;
+      entry.net += week.amount * ratio;
+      byWeek.set(week.week_start, entry);
+    }
+  }
+  const weeks = [...byWeek.entries()]
+    .filter(([, w]) => w.sessions > 0 || w.net > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (weeks.length === 0 && groupFee > 0) {
+    // A group-only weekly family: the fee alone, on the month's first week.
+    weeks.push([billingSpan(year, month).from, { sessions: 0, net: 0 }]);
+  }
+  return weeks.map(([weekStart, w], i) => {
+    const date = addDays(weekStart, weekday);
+    const amount = round2(w.net * siblingRatio + (i === 0 ? groupFee : 0));
+    return {
+      day: Number(date.slice(8, 10)),
+      period_start: date,
+      derived: amount,
+      override: null,
+      amount,
+      paid: false,
+    };
+  });
 }
 
 /**

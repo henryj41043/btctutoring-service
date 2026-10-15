@@ -89,6 +89,17 @@ describe('Contacts (integration)', () => {
     expect(res.body.message).toBe('Contact created successfully.');
   });
 
+  it('a weekly family needs its weekday (service validation, 400)', async () => {
+    const res = await request(server())
+      .post('/contacts')
+      .set('x-test-role', 'admin')
+      .send({ first_name: 'Wen', last_name: 'Kly', billing_cycle: 'weekly' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe(
+      'A weekly billing cycle needs the weekday the family is billed on.',
+    );
+  });
+
   it('non-admin cannot create a contact', async () => {
     const res = await request(server())
       .post('/contacts')

@@ -21,6 +21,8 @@ export const ContactsSchema = new dynamoose.Schema({
   charge_per_billing_cycle: Number,
   amount_to_be_paid_this_month: Number,
   billing_cycle: String,
+  // Weekly families: the weekday each due falls on ('SUNDAY'…'SATURDAY').
+  billing_weekday: String,
   sibling_discount: Number,
   cc_authorization_received: Boolean,
   twenty_five_deducted: Boolean,

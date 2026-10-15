@@ -20,7 +20,10 @@ import {
   studentLines,
   studentNeedsAttention,
   billingWindow,
+  cycleOf,
   serviceBounds,
+  Statement,
+  weeklyDues,
 } from './statement-engine';
 
 const catalog: PackageCatalog = {
@@ -1628,6 +1631,271 @@ describe('buildStatement', () => {
       ]);
       expect(junk.dues[0].override).toBeNull();
     });
+  });
+});
+
+describe('weekly families', () => {
+  const friday = contact({
+    billing_cycle: 'weekly',
+    billing_weekday: 'FRIDAY',
+  });
+  // Succeed: $456 a month, 2 a week → $105.23 a week, $52.62 a session.
+  const weeklyStudent = (over: Partial<Student> = {}) =>
+    student({ package: 'Succeed', schedule: WED_FRI, ...over });
+  const dueList = (s: Statement) =>
+    s.dues.map((d) => [d.period_start, d.amount]);
+
+  it('cycleOf folds the legacy values and reads weekly', () => {
+    expect(cycleOf('monthly')).toBe('monthly');
+    expect(cycleOf('custom')).toBe('monthly');
+    expect(cycleOf(undefined)).toBe('monthly');
+    expect(cycleOf('semi_monthly')).toBe('semi_monthly');
+    expect(cycleOf('biweekly')).toBe('semi_monthly');
+    expect(cycleOf('weekly')).toBe('weekly');
+  });
+
+  it('bills a four-week month as four weekly dues on the chosen weekday', () => {
+    const oct = statementFor([weeklyStudent()], friday, [], 9);
+    expect(oct.cycle).toBe('weekly');
+    expect(dueList(oct)).toEqual([
+      ['2026-10-09', 105.23],
+      ['2026-10-16', 105.23],
+      ['2026-10-23', 105.23],
+      ['2026-10-30', 105.23],
+    ]);
+    expect(oct.dues.map((d) => d.day)).toEqual([9, 16, 23, 30]);
+    expect(oct.total).toBe(420.92);
+    expect(oct.total_due).toBe(420.92);
+    expect(oct.lines[0]).toEqual(
+      expect.objectContaining({
+        from: '2026-10-04',
+        to: '2026-10-31',
+        amount: 420.92,
+        net: 420.92,
+        monthly_price: 456,
+        rate: 52.62,
+        flags: [],
+        weeks: [
+          { week_start: '2026-10-04', sessions: 2, amount: 105.23 },
+          { week_start: '2026-10-11', sessions: 2, amount: 105.23 },
+          { week_start: '2026-10-18', sessions: 2, amount: 105.23 },
+          { week_start: '2026-10-25', sessions: 2, amount: 105.23 },
+        ],
+      }),
+    );
+  });
+
+  it('a five-week month has five dues, the last one dated in the next month', () => {
+    const sept = statementFor([weeklyStudent()], friday);
+    expect(dueList(sept)).toEqual([
+      ['2026-09-04', 105.23],
+      ['2026-09-11', 105.23],
+      ['2026-09-18', 105.23],
+      ['2026-09-25', 105.23],
+      ['2026-10-02', 105.23],
+    ]);
+    expect(sept.total).toBe(526.15);
+    expect(sept.lines[0].from).toBe('2026-08-30');
+    expect(sept.lines[0].to).toBe('2026-10-03');
+  });
+
+  it('a partial first week bills per session, and empty weeks are left out', () => {
+    // Thu Oct 1 start: only Fri Oct 2 falls in the Sept 27–Oct 3 week.
+    const sept = statementFor(
+      [weeklyStudent({ package_start_date: '2026-10-01T00:00:00' })],
+      friday,
+    );
+    expect(dueList(sept)).toEqual([['2026-10-02', 52.62]]);
+    expect(sept.lines[0].weeks).toEqual([
+      { week_start: '2026-09-27', sessions: 1, amount: 52.62 },
+    ]);
+    expect(sept.flags).toEqual(['prorated_start']);
+    // An end on Tue Nov 3: Nov 1–7 holds no Wed/Fri before it.
+    const nov = statementFor(
+      [
+        weeklyStudent({
+          status: 'Past Student',
+          service_end_date: '2026-11-03',
+        }),
+      ],
+      friday,
+      [],
+      10,
+    );
+    expect(dueList(nov)).toEqual([]);
+    expect(nov.total).toBe(0);
+  });
+
+  it('splits a package-change week between the two packages', () => {
+    // Start (Mon, $63 a week) until Oct 13, then Succeed (Wed/Fri) from Oct 14.
+    const changer = student({
+      package: 'Succeed',
+      package_start_date: '2026-10-14T00:00:00',
+      schedule: WED_FRI,
+      package_history: [
+        {
+          package: 'Start',
+          start: '2026-05-01',
+          end: '2026-10-13',
+          schedule: MONDAY,
+        },
+      ],
+    });
+    const oct = statementFor([changer], friday, [], 9);
+    expect(dueList(oct)).toEqual([
+      ['2026-10-09', 63],
+      ['2026-10-16', 168.23],
+      ['2026-10-23', 105.23],
+      ['2026-10-30', 105.23],
+    ]);
+    expect(oct.total).toBe(441.69);
+  });
+
+  it('applies the student discount per week, the sibling discount in proportion, and the group fee on the first due', () => {
+    const s = statementFor(
+      [
+        weeklyStudent({ discount_percent: 50 }),
+        weeklyStudent({ id: 's-2', name: 'Sam' }),
+        weeklyStudent({ id: 's-3', name: 'Kim', btc_and_me: true }),
+      ],
+      contact({ ...friday, sibling_discount: 10 }),
+      [],
+      9,
+    );
+    // Per week: 52.615 + 105.23 + 105.23 = 263.075, less 10% = 236.77.
+    expect(dueList(s)).toEqual([
+      ['2026-10-09', 311.77],
+      ['2026-10-16', 236.77],
+      ['2026-10-23', 236.77],
+      ['2026-10-30', 236.77],
+    ]);
+    expect(s.group_fee).toBe(75);
+    expect(s.sibling_discount_percent).toBe(10);
+    expect(s.total).toBe(1022.08);
+  });
+
+  it('a ghost package keeps its weeks at $0, flagged no charge', () => {
+    const s = statementFor(
+      [student({ package: 'Ghost', schedule: MONDAY })],
+      friday,
+      [],
+      9,
+    );
+    expect(dueList(s)).toEqual([
+      ['2026-10-09', 0],
+      ['2026-10-16', 0],
+      ['2026-10-23', 0],
+      ['2026-10-30', 0],
+    ]);
+    expect(s.flags).toEqual(['no_charge']);
+  });
+
+  it('a group-only weekly family owes the fee once, on the first week', () => {
+    const s = statementFor(
+      [student({ package: '', btc_and_me: true })],
+      friday,
+      [],
+      9,
+    );
+    expect(dueList(s)).toEqual([['2026-10-09', 75]]);
+  });
+
+  it('without a weekday the dues fall on Saturday and the statement needs attention', () => {
+    const s = statementFor(
+      [weeklyStudent()],
+      contact({ billing_cycle: 'weekly' }),
+      [],
+      9,
+    );
+    expect(s.dues.map((d) => d.period_start)).toEqual([
+      '2026-10-10',
+      '2026-10-17',
+      '2026-10-24',
+      '2026-10-31',
+    ]);
+    expect(s.needs_attention).toBe(true);
+  });
+
+  it('a payment record keyed on a weekly date is laid over its due', () => {
+    const s = statementFor(
+      [weeklyStudent()],
+      friday,
+      [
+        {
+          contact_id: 'c-1',
+          period_start: '2026-10-16',
+          paid: true,
+          amount_override: 100,
+        },
+      ] as BillingRecord[],
+      9,
+    );
+    expect(s.dues[1]).toEqual(
+      expect.objectContaining({
+        period_start: '2026-10-16',
+        paid: true,
+        override: 100,
+        amount: 100,
+      }),
+    );
+    expect(s.total_due).toBe(415.69);
+  });
+
+  it('a segment without a schedule bills the weekly price every week', () => {
+    const s = statementFor([weeklyStudent({ schedule: [] })], friday, [], 9);
+    expect(dueList(s).map(([, a]) => a)).toEqual([
+      105.23, 105.23, 105.23, 105.23,
+    ]);
+    expect(s.needs_attention).toBe(true);
+  });
+
+  it('weeklyDues skips empty weeks and sorts by date', () => {
+    const line = (
+      weeks: { week_start: string; sessions: number; amount: number }[],
+    ) => ({ amount: 100, net: 100, weeks }) as StatementLine;
+    expect(
+      weeklyDues(
+        [
+          line([
+            { week_start: '2026-10-11', sessions: 2, amount: 50 },
+            { week_start: '2026-10-04', sessions: 0, amount: 0 },
+          ]),
+          line([{ week_start: '2026-10-04', sessions: 1, amount: 25 }]),
+        ],
+        5,
+        1,
+        0,
+        Y,
+        9,
+      ).map((d) => [d.period_start, d.amount]),
+    ).toEqual([
+      ['2026-10-09', 25],
+      ['2026-10-16', 50],
+    ]);
+    expect(weeklyDues([line([])], 5, 1, 0, Y, 9)).toEqual([]);
+    // A $0 line contributes nothing but keeps its weeks when they have sessions.
+    expect(
+      weeklyDues(
+        [
+          {
+            amount: 0,
+            net: 0,
+            weeks: [{ week_start: '2026-10-04', sessions: 1, amount: 0 }],
+          } as StatementLine,
+        ],
+        5,
+        1,
+        0,
+        Y,
+        9,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        period_start: '2026-10-09',
+        amount: 0,
+        day: 9,
+      }),
+    ]);
   });
 });
 
