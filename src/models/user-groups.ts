@@ -10,6 +10,15 @@ export const isLeadTutor = (groups: string[]): boolean =>
   groups.includes('LeadTutors');
 
 /**
+ * Support Staff (client 2026-10-15): non-tutor employees who only log their
+ * own hours. They are NOT tutor-like — no students, no staff list, no
+ * make-ups — and may only read, create, edit and delete their own ADMIN
+ * (Admin Time) sessions.
+ */
+export const isSupportStaff = (groups: string[]): boolean =>
+  groups.includes('SupportStaff');
+
+/**
  * A CURRENT admin: in the Admins group AND current staff (service Hiring,
  * status Staff). The group alone is not enough — former staff and employment
  * inquiries can still carry it (client 2026-09-14: non-employees showed up

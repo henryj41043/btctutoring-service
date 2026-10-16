@@ -33,13 +33,32 @@ import express from 'express';
 import { User } from '../models/user.model';
 import { MakeupSetDto } from './dto/makeup-set.dto';
 import { Session, SessionType } from '../models/session.model';
-import { isLeadTutor, isTutorLike } from '../models/user-groups';
+import {
+  isLeadTutor,
+  isSupportStaff,
+  isTutorLike,
+} from '../models/user-groups';
 
 export const ATTENDANCE_ROUTE_MESSAGE =
   'Take attendance with PUT /sessions/:id/attendance.';
 
 export const SESSION_TYPE_LOCKED_MESSAGE =
   'Only an admin can change the session type.';
+
+export const SUPPORT_STAFF_MESSAGE =
+  'Support staff may only log their own Admin Time.';
+
+/**
+ * Support Staff log hours as ADMIN (Admin Time) sessions assigned to
+ * themselves, with no student and no roster. This is the whole of what the
+ * group may write, so every payload they send is held to it.
+ */
+const isOwnAdminTime = (session: Session, user: User): boolean =>
+  session.type === SessionType.ADMIN &&
+  !!session.tutor_id &&
+  session.tutor_id === user.contact &&
+  !session.student_id &&
+  !(session.participants && session.participants.length > 0);
 
 @Controller('sessions')
 export class SessionsController {
@@ -87,7 +106,11 @@ export class SessionsController {
         return this.sessionsService.getSessions(tutor, student, range);
       }
     } else if (tutor) {
-      if (isAdmin || (tutorLike && idMatchesTutor)) {
+      // Support Staff read their own sessions too (their Admin Time blocks).
+      if (
+        isAdmin ||
+        ((tutorLike || isSupportStaff(groups)) && idMatchesTutor)
+      ) {
         return this.sessionsService.getSessionsByTutor(tutor, range);
       }
     } else if (student) {
@@ -165,6 +188,15 @@ export class SessionsController {
     if (isTutorLike(groups) && isOwnMakeup) {
       return this.sessionsService.createSession(session);
     }
+    // Support Staff log their own hours: an ADMIN session assigned to
+    // themselves, nothing else (client 2026-10-15).
+    if (isSupportStaff(groups)) {
+      if (isOwnAdminTime(session, user)) {
+        return this.sessionsService.createSession(session);
+      }
+      Logger.error('Support staff may only create their own Admin Time');
+      throw new ForbiddenException(SUPPORT_STAFF_MESSAGE);
+    }
     Logger.error('Creating new session is restricted to admins');
     throw new ForbiddenException('Unauthorized');
   }
@@ -221,8 +253,9 @@ export class SessionsController {
     // own tutor_id in the payload.
     const idMatchesTutor: boolean =
       !!session.tutor_id && session.tutor_id === user.contact;
+    const support: boolean = isSupportStaff(groups);
     const mayOwn: boolean =
-      isTutorLike(groups) && idMatchesTutor && !!session.id;
+      (isTutorLike(groups) || support) && idMatchesTutor && !!session.id;
     if (!isAdmin && !mayOwn) {
       Logger.error('Invalid credentials for the session being edited');
       throw new ForbiddenException('Unauthorized');
@@ -234,6 +267,15 @@ export class SessionsController {
     if (!isAdmin && (!stored || stored.tutor_id !== user.contact)) {
       Logger.error('Invalid credentials for the session being edited');
       throw new ForbiddenException('Unauthorized');
+    }
+    // Support Staff own nothing but Admin Time: the stored session must be
+    // one, and the edit must leave it one (the type lock below also holds).
+    if (
+      support &&
+      (stored?.type !== SessionType.ADMIN || !isOwnAdminTime(session, user))
+    ) {
+      Logger.error(`Session ${session.id}: refused a support-staff edit`);
+      throw new ForbiddenException(SUPPORT_STAFF_MESSAGE);
     }
     if (stored && isFinalized(stored.status)) {
       const locked = lockedFieldChanges(stored, session);
@@ -328,12 +370,26 @@ export class SessionsController {
     @Param('id') id: string,
   ): Promise<any> {
     const user: User = req.user as User;
-    const isAdmin: boolean = (user.groups ?? []).includes('Admins');
+    const groups: string[] = user.groups ?? [];
+    const isAdmin: boolean = groups.includes('Admins');
     if (isAdmin) {
       return this.sessionsService.deleteSession(id);
-    } else {
-      Logger.error('Deleting a session is restricted to admins');
-      throw new ForbiddenException('Unauthorized');
     }
+    // Support Staff remove their own Admin Time blocks (a mis-logged day);
+    // ownership and type are checked against the STORED session.
+    if (isSupportStaff(groups)) {
+      const stored = await this.sessionsService.getSessionById(id);
+      if (
+        stored &&
+        stored.tutor_id === user.contact &&
+        stored.type === SessionType.ADMIN
+      ) {
+        return this.sessionsService.deleteSession(id);
+      }
+      Logger.error(`Session ${id}: refused a support-staff delete`);
+      throw new ForbiddenException(SUPPORT_STAFF_MESSAGE);
+    }
+    Logger.error('Deleting a session is restricted to admins');
+    throw new ForbiddenException('Unauthorized');
   }
 }

@@ -317,6 +317,90 @@ describe('Sessions (integration)', () => {
     expect(denied.status).toBe(403);
   });
 
+  describe('support staff', () => {
+    const adminTime = {
+      id: 'a-1',
+      type: 'ADMIN',
+      tutor_id: 'contact-support',
+      status: 'Pending',
+    };
+
+    it('reads only their own sessions', async () => {
+      scanResolves(Model, []);
+      const own = await request(server())
+        .get('/sessions?tutor=contact-support')
+        .set('x-test-role', 'support');
+      expect(own.status).toBe(200);
+      expect(Model.scan).toHaveBeenCalledWith({
+        tutor_id: { eq: 'contact-support' },
+      });
+      const other = await request(server())
+        .get('/sessions?tutor=contact-tutor')
+        .set('x-test-role', 'support');
+      expect(other.status).toBe(403);
+      const all = await request(server())
+        .get('/sessions')
+        .set('x-test-role', 'support');
+      expect(all.status).toBe(403);
+    });
+
+    it('logs their own Admin Time but no other kind of session', async () => {
+      Model.__save.mockResolvedValue(undefined);
+      const ok = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'support')
+        .send({ ...adminTime, id: undefined });
+      expect(ok.status).toBe(201);
+      expect(ok.body.message).toBe('Session created successfully.');
+
+      const tutoring = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'support')
+        .send({ ...adminTime, id: undefined, type: 'TUTORING' });
+      expect(tutoring.status).toBe(403);
+      expect(tutoring.body.message).toBe(
+        'Support staff may only log their own Admin Time.',
+      );
+      const other = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'support')
+        .send({ ...adminTime, id: undefined, tutor_id: 'contact-tutor' });
+      expect(other.status).toBe(403);
+      expect(Model.__save).toHaveBeenCalledTimes(1);
+    });
+
+    it('edits and deletes their own stored Admin Time only', async () => {
+      Model.get.mockResolvedValue(adminTime);
+      Model.update.mockResolvedValue(adminTime);
+      Model.delete.mockResolvedValue(undefined);
+      const edit = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'support')
+        .send({ ...adminTime, notes: 'Newsletter draft' });
+      expect(edit.status).toBe(200);
+      expect(Model.update).toHaveBeenCalledTimes(1);
+
+      const retype = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'support')
+        .send({ ...adminTime, type: 'TUTORING' });
+      expect(retype.status).toBe(403);
+
+      const del = await request(server())
+        .delete('/sessions/a-1')
+        .set('x-test-role', 'support');
+      expect(del.status).toBe(200);
+      expect(Model.delete).toHaveBeenCalledWith({ id: 'a-1' });
+
+      Model.get.mockResolvedValue({ ...adminTime, tutor_id: 'contact-tutor' });
+      const notMine = await request(server())
+        .delete('/sessions/a-1')
+        .set('x-test-role', 'support');
+      expect(notMine.status).toBe(403);
+      expect(Model.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('a tutor cannot hijack a session stored under another tutor', async () => {
     // Payload claims the caller, but the stored record says otherwise.
     Model.get.mockResolvedValue({ id: 's-9', tutor_id: 'contact-other' });

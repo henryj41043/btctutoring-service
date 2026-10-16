@@ -30,6 +30,12 @@ const lead: User = {
   groups: ['LeadTutors'],
   contact: 'c-lead',
 };
+const support: User = {
+  username: 'support',
+  email: 'support@example.com',
+  groups: ['SupportStaff'],
+  contact: 'c-support',
+};
 
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
@@ -899,6 +905,142 @@ describe('SessionsController', () => {
     it('non-admin cannot delete a session', async () => {
       await expect(
         controller.deleteSession(reqAs(tutor), 's-1'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.deleteSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('support staff (own Admin Time only)', () => {
+    const adminTime = (overrides: Partial<Session> = {}): Session =>
+      session({
+        id: 'a-1',
+        type: SessionType.ADMIN,
+        tutor_id: 'c-support',
+        student_id: undefined,
+        ...overrides,
+      });
+
+    it('reads their own sessions via ?tutor=self, nothing else', async () => {
+      await controller.getSessions(reqAs(support), 'c-support', '', '', '', '');
+      expect(service.getSessionsByTutor).toHaveBeenCalledWith(
+        'c-support',
+        undefined,
+      );
+      await expect(
+        controller.getSessions(reqAs(support), 'c-tutor', '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getSessions(reqAs(support), '', '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getSessions(reqAs(support), 'c-support', 'st-1', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getSessions(reqAs(support), '', '', 'series-1', '', ''),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('creates an Admin Time session for themselves', async () => {
+      await controller.createSession(reqAs(support), adminTime());
+      expect(service.createSession).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a tutoring session', { type: SessionType.TUTORING }],
+      ['a make-up', { type: SessionType.MAKE_UP }],
+      ["someone else's Admin Time", { tutor_id: 'c-tutor' }],
+      ['Admin Time with no staff on it', { tutor_id: undefined }],
+      ['Admin Time with a student attached', { student_id: 'st-1' }],
+      [
+        'Admin Time with participants',
+        { participants: [{ id: 'st-1', name: 'S' }] },
+      ],
+    ])('cannot create %s', async (_label, overrides) => {
+      await expect(
+        controller.createSession(reqAs(support), adminTime(overrides)),
+      ).rejects.toThrow('Support staff may only log their own Admin Time.');
+      expect(service.createSession).not.toHaveBeenCalled();
+    });
+
+    it('edits their own stored Admin Time', async () => {
+      service.getSessionById.mockResolvedValue(adminTime());
+      await controller.updateSession(
+        reqAs(support),
+        adminTime({ notes: 'Newsletter' }),
+      );
+      expect(service.updateSession).toHaveBeenCalled();
+    });
+
+    it('cannot edit a stored session that is not Admin Time', async () => {
+      service.getSessionById.mockResolvedValue(
+        adminTime({ type: SessionType.TUTORING }),
+      );
+      await expect(
+        controller.updateSession(reqAs(support), adminTime()),
+      ).rejects.toThrow('Support staff may only log their own Admin Time.');
+      expect(service.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('cannot turn their Admin Time into something else or add a student', async () => {
+      service.getSessionById.mockResolvedValue(adminTime());
+      await expect(
+        controller.updateSession(
+          reqAs(support),
+          adminTime({ type: SessionType.TUTORING }),
+        ),
+      ).rejects.toThrow('Support staff may only log their own Admin Time.');
+      await expect(
+        controller.updateSession(
+          reqAs(support),
+          adminTime({ student_id: 'st-1' }),
+        ),
+      ).rejects.toThrow('Support staff may only log their own Admin Time.');
+      expect(service.updateSession).not.toHaveBeenCalled();
+    });
+
+    it("cannot edit someone else's session, stored or claimed", async () => {
+      await expect(
+        controller.updateSession(
+          reqAs(support),
+          adminTime({ tutor_id: 'c-tutor' }),
+        ),
+      ).rejects.toThrow('Unauthorized');
+      service.getSessionById.mockResolvedValue(
+        adminTime({ tutor_id: 'c-tutor' }),
+      );
+      await expect(
+        controller.updateSession(reqAs(support), adminTime()),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('deletes their own stored Admin Time', async () => {
+      service.getSessionById.mockResolvedValue(adminTime());
+      await controller.deleteSession(reqAs(support), 'a-1');
+      expect(service.getSessionById).toHaveBeenCalledWith('a-1');
+      expect(service.deleteSession).toHaveBeenCalledWith('a-1');
+    });
+
+    it.each([
+      ['a missing session', undefined],
+      ["someone else's Admin Time", { tutor_id: 'c-tutor' }],
+      ['their own tutoring session', { type: SessionType.TUTORING }],
+    ])('cannot delete %s', async (_label, overrides) => {
+      service.getSessionById.mockResolvedValue(
+        overrides ? adminTime(overrides) : undefined,
+      );
+      await expect(
+        controller.deleteSession(reqAs(support), 'a-1'),
+      ).rejects.toThrow('Support staff may only log their own Admin Time.');
+      expect(service.deleteSession).not.toHaveBeenCalled();
+    });
+
+    it('cannot email notes or batch-create', async () => {
+      await expect(
+        controller.emailSessionNotes(reqAs(support), 'a-1'),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.createSessions(reqAs(support), [adminTime()]),
       ).rejects.toThrow('Unauthorized');
     });
   });
