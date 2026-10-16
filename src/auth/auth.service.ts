@@ -27,7 +27,12 @@ import * as crypto from 'crypto';
 import { ResponseDto } from './dto/response.dto';
 
 /** The Cognito groups a user account may belong to. A user must be in exactly one. */
-export const VALID_USER_GROUPS = ['Admins', 'Tutors', 'LeadTutors'];
+export const VALID_USER_GROUPS = [
+  'Admins',
+  'Tutors',
+  'LeadTutors',
+  'SupportStaff',
+];
 
 @Injectable()
 export class AuthService {
@@ -174,7 +179,7 @@ export class AuthService {
   private assertValidGroup(group: string): void {
     if (!group || !VALID_USER_GROUPS.includes(group)) {
       throw new BadRequestException(
-        'A valid group (Admins, Tutors, or LeadTutors) is required to create a user.',
+        'A valid group (Admins, Tutors, LeadTutors, or SupportStaff) is required to create a user.',
       );
     }
   }

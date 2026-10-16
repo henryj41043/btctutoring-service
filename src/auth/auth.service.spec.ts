@@ -179,9 +179,19 @@ describe('AuthService', () => {
       await expect(
         service.adminCreateUser('a@b.com', group, 'contact-1'),
       ).rejects.toThrow(
-        'A valid group (Admins, Tutors, or LeadTutors) is required to create a user.',
+        'A valid group (Admins, Tutors, LeadTutors, or SupportStaff) is required to create a user.',
       );
       expect(cognitoMock.commandCalls(AdminCreateUserCommand)).toHaveLength(0);
+    });
+
+    it('accepts the SupportStaff group', async () => {
+      cognitoMock
+        .on(AdminCreateUserCommand)
+        .resolves({ User: { Username: 'a@b.com' } });
+      await service.adminCreateUser('a@b.com', 'SupportStaff', 'contact-1');
+      const groupCall = cognitoMock.commandCalls(AdminAddUserToGroupCommand);
+      expect(groupCall).toHaveLength(1);
+      expect(groupCall[0].args[0].input.GroupName).toBe('SupportStaff');
     });
 
     it('accepts the LeadTutors group', async () => {

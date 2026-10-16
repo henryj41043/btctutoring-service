@@ -36,10 +36,17 @@ export const LEAD_USER: User = {
   contact: 'contact-lead',
 };
 
+export const SUPPORT_USER: User = {
+  username: 'support',
+  email: 'support@example.com',
+  groups: ['SupportStaff'],
+  contact: 'contact-support',
+};
+
 /**
  * Stand-in for the real Cognito JWT guard. It reads an `x-test-role` header and
  * attaches the matching test user, so a single booted app can exercise the
- * controllers' admin / tutor / stranger authorization branches over HTTP.
+ * controllers' admin / tutor / lead / support / stranger authorization branches over HTTP.
  */
 export const testAuthGuard = {
   canActivate: (context: ExecutionContext): boolean => {
@@ -50,6 +57,9 @@ export const testAuthGuard = {
         break;
       case 'lead':
         req.user = LEAD_USER;
+        break;
+      case 'support':
+        req.user = SUPPORT_USER;
         break;
       case 'none':
         req.user = STRANGER_USER;
