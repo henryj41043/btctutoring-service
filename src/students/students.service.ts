@@ -104,6 +104,8 @@ export class StudentsService {
       package: student.package,
       scholarship: student.scholarship,
       btc_and_me: student.btc_and_me,
+      // Only the 15th is stored; the 1st is the default (absent).
+      billing_due_day: student.billing_due_day === 15 ? 15 : undefined,
       schedule: schedule && schedule.length > 0 ? schedule : undefined,
       package_start_date: student.package_start_date,
       auto_renew: student.auto_renew,
@@ -374,8 +376,22 @@ export class StudentsService {
    * null or 0% discount, and the reason whenever the discount goes or the
    * reason itself is blanked.
    */
+  /** Rejects a due day other than the 1st or the 15th (null = back to the 1st). */
+  private assertBillingDueDay(student: Student): void {
+    const day: unknown = student.billing_due_day;
+    if (day !== undefined && day !== null && day !== 1 && day !== 15) {
+      throw new BadRequestException(
+        'billing_due_day must be 1 or 15, or null for the 1st.',
+      );
+    }
+  }
+
   private pricingRemovals(student: Student): string[] {
     const remove: string[] = [];
+    // Back to the default 1st: the stored 15 leaves.
+    if (student.billing_due_day === 1 || student.billing_due_day === null) {
+      remove.push('billing_due_day');
+    }
     if (student.price_override === null) remove.push('price_override');
     const percent: unknown = student.discount_percent;
     const discountCleared = percent === null || percent === 0;
@@ -627,6 +643,7 @@ export class StudentsService {
 
   async createStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
+    this.assertBillingDueDay(student);
     this.assertServiceEnd(student);
     this.assertPackageStart(student);
     this.assertFirstWeekSessions(student);
@@ -661,6 +678,7 @@ export class StudentsService {
 
   async updateStudent(student: Student, now: Date = new Date()) {
     this.assertPricing(student);
+    this.assertBillingDueDay(student);
     this.assertServiceEnd(student);
     this.assertPackageStart(student);
     this.assertFirstWeekSessions(student);

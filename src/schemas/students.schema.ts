@@ -39,6 +39,8 @@ export const StudentsSchema = new dynamoose.Schema({
   scholarship: Boolean,
   // Enrolled in the "BTC & Me" group program (flat monthly fee billing).
   btc_and_me: Boolean,
+  // 15 = a monthly family pays this student's month on the 15th (absent = 1st).
+  billing_due_day: Number,
   schedule: {
     type: Array,
     schema: [SCHEDULE_SLOT_SCHEMA],

@@ -1567,6 +1567,98 @@ describe('buildStatement', () => {
     });
   });
 
+  describe('a student due on the 15th (monthly families, client 2026-11-09)', () => {
+    const dueDays = (students: Student[], c: Contact = contact()) =>
+      statementFor(students, c).dues.map((d) => [d.day, d.derived]);
+    const onFifteenth = { id: 's-2', name: 'Sam', billing_due_day: 15 };
+
+    it("splits the family: one child's month on the 1st, the other's on the 15th", () => {
+      const s = statementFor([student(), student(onFifteenth)]);
+      expect(s.cycle).toBe('monthly');
+      expect(s.dues.map((d) => [d.day, d.period_start, d.derived])).toEqual([
+        [1, '2026-09-01', 273],
+        [15, '2026-09-15', 273],
+      ]);
+      expect(s.total).toBe(546);
+      expect(s.lines.map((l) => [l.student_name, l.due_day])).toEqual([
+        ['Pat', undefined],
+        ['Sam', 15],
+      ]);
+    });
+
+    it('shares the sibling discount (three or more children) in proportion', () => {
+      // 819 less 10% = 737.10: two children's share on the 1st, one on the 15th.
+      expect(
+        dueDays(
+          [student(), student({ id: 's-3' }), student(onFifteenth)],
+          contact({ sibling_discount: 10 }),
+        ),
+      ).toEqual([
+        [1, 491.4],
+        [15, 245.7],
+      ]);
+    });
+
+    it('a family whose only student is on the 15th has a single due on the 15th', () => {
+      expect(dueDays([student({ billing_due_day: 15 })])).toEqual([[15, 273]]);
+    });
+
+    it('keeps the BTC & Me fee on the 1st', () => {
+      expect(
+        dueDays([
+          student({ id: 's-3', package: '', btc_and_me: true }),
+          student(onFifteenth),
+        ]),
+      ).toEqual([
+        [1, 75],
+        [15, 273],
+      ]);
+    });
+
+    it('a 15th student starting mid-month owes the prorated month on the 15th', () => {
+      expect(
+        dueDays([
+          student(),
+          student({
+            ...onFifteenth,
+            package_start_date: '2026-09-15T00:00:00',
+          }),
+        ]),
+      ).toEqual([
+        [1, 273],
+        [15, 126],
+      ]);
+    });
+
+    it('semi-monthly and weekly families ignore the due day', () => {
+      const semi = statementFor(
+        [student(), student(onFifteenth)],
+        contact({ billing_cycle: 'semi_monthly' }),
+      );
+      expect(semi.dues.map((d) => [d.day, d.derived])).toEqual([
+        [1, 273],
+        [15, 273],
+      ]);
+      expect(semi.lines.every((l) => l.due_day === undefined)).toBe(true);
+      const weekly = statementFor(
+        [student(onFifteenth)],
+        contact({ billing_cycle: 'weekly', billing_weekday: 'FRIDAY' }),
+      );
+      expect(weekly.lines.every((l) => l.due_day === undefined)).toBe(true);
+      expect(
+        weekly.dues.every(
+          (d) => d.day !== 15 || d.period_start.endsWith('-15'),
+        ),
+      ).toBe(true);
+    });
+
+    it('every student on the 1st keeps the single due', () => {
+      expect(
+        dueDays([student({ billing_due_day: 1 }), student({ id: 's-2' })]),
+      ).toEqual([[1, 546]]);
+    });
+  });
+
   describe('per-date records', () => {
     const semi = contact({ billing_cycle: 'semi_monthly' });
     const record = (overrides: Partial<BillingRecord>): BillingRecord => ({

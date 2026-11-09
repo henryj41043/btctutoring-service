@@ -72,6 +72,11 @@ export class Student {
   scholarship?: boolean;
   /** Enrolled in the "BTC & Me" group program — bills a flat monthly fee. */
   btc_and_me?: boolean;
+  /**
+   * Monthly families only: 15 when this student's month is due on the 15th
+   * instead of the 1st (client 2026-11-09). Absent = the 1st.
+   */
+  billing_due_day?: number | null;
   schedule?: ScheduleSlot[];
   package_start_date?: string;
   auto_renew?: boolean;
