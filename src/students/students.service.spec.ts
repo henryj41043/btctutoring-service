@@ -1726,4 +1726,37 @@ describe('StudentsService', () => {
       );
     });
   });
+
+  describe('getStudentsByTutors (Team Roster)', () => {
+    it('lists nobody for an empty team, without scanning', async () => {
+      await expect(
+        service.getStudentsByTutors(['', ''], 'c-lead'),
+      ).resolves.toEqual([]);
+      expect(Model.scan).not.toHaveBeenCalled();
+    });
+
+    it("keeps students any tutor sees, less the excluded tutor's own", async () => {
+      scanResolves(Model, [
+        { id: 'a', assigned_tutor_id: 'm1' },
+        {
+          id: 'b',
+          assigned_tutor_id: 'c-lead',
+          schedule: [{ tutor_id: 'm1' }],
+        },
+        { id: 'c', assigned_tutor_id: 'x' },
+      ]);
+      const result = await service.getStudentsByTutors(['m1'], 'c-lead');
+      expect(result.map((s) => s.id)).toEqual(['a']);
+      await expect(service.getStudentsByTutors(['m1'])).resolves.toHaveLength(
+        2,
+      );
+    });
+
+    it('propagates a failed scan', async () => {
+      scanRejects(Model, new Error('scan boom'));
+      await expect(service.getStudentsByTutors(['m1'])).rejects.toThrow(
+        'scan boom',
+      );
+    });
+  });
 });

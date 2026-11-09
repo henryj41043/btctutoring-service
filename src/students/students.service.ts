@@ -458,6 +458,31 @@ export class StudentsService {
     return studentVisibleToTutor(student, tutorId);
   }
 
+  /**
+   * Students any of the given tutors sees (assigned or by slot), less the
+   * ones assigned to `excludeTutorId` (a lead's own students, on My Roster).
+   * One scan; an empty tutor list lists nobody.
+   */
+  async getStudentsByTutors(
+    tutorIds: string[],
+    excludeTutorId?: string,
+  ): Promise<Student[]> {
+    const ids = tutorIds.filter(Boolean);
+    if (ids.length === 0) return [];
+    const students = (await StudentsModel.scan()
+      .all()
+      .exec()
+      .catch((error: Error) => {
+        Logger.error(error.message, error);
+        return Promise.reject(error);
+      })) as unknown as Student[];
+    return students.filter(
+      (s) =>
+        s.assigned_tutor_id !== excludeTutorId &&
+        ids.some((id) => this.isVisibleToTutor(s, id)),
+    );
+  }
+
   async getStudentsByTutor(tutorId: string) {
     return StudentsModel.scan()
       .all()

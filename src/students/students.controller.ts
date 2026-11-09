@@ -17,11 +17,15 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Student } from '../models/student.model';
-import { isTutorLike } from '../models/user-groups';
+import { isLeadTutor, isTutorLike } from '../models/user-groups';
+import { TeamsService } from '../teams/teams.service';
 
 @Controller('students')
 export class StudentsController {
-  constructor(private readonly studentsService: StudentsService) {}
+  constructor(
+    private readonly studentsService: StudentsService,
+    private readonly teamsService: TeamsService,
+  ) {}
 
   @Get('onboarding')
   @UseGuards(AuthGuard('jwt'))
@@ -44,6 +48,7 @@ export class StudentsController {
     @Query('contact') contactId: string,
     @Query('tutor') tutorId: string,
     @Query('include') include: string,
+    @Query('team') team?: string,
   ): Promise<any> {
     const user: User = req.user as User;
     const groups: string[] = user.groups ?? [];
@@ -54,6 +59,24 @@ export class StudentsController {
     // Tutors may list their own assigned students (rosters, payroll credits) —
     // user.contact is the tutor's contact id, which students store as
     // assigned_tutor_id.
+    // Lead Tutors: ?team=self lists the students of the tutors they manage
+    // (their Team Roster, client 2026-11-09), resolved server-side through
+    // nested teams like the team calendar. Their own students are on My
+    // Roster, so they are left out here.
+    if (team === 'self' && !isAdmin) {
+      if (!isLeadTutor(groups) || !user.contact) {
+        Logger.error('Team roster refused: not a lead tutor');
+        throw new ForbiddenException('Unauthorized');
+      }
+      const members = await this.teamsService.resolveTeamTutorIds(user.contact);
+      const students = (await this.studentsService.getStudentsByTutors(
+        members,
+        user.contact,
+      )) as unknown as Student[];
+      return withNames
+        ? this.studentsService.withContactNames(students)
+        : students;
+    }
     if (
       !isAdmin &&
       isTutorLike(groups) &&

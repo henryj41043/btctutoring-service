@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import express from 'express';
 import { StudentsController } from './students.controller';
 import { StudentsService } from './students.service';
+import { TeamsService } from '../teams/teams.service';
 import { User } from '../models/user.model';
 import { Student } from '../models/student.model';
 
@@ -32,12 +33,14 @@ const student = { id: 'student-1', name: 'Pat' } as Student;
 describe('StudentsController', () => {
   let controller: StudentsController;
   let service: jest.Mocked<StudentsService>;
+  let teams: { resolveTeamTutorIds: jest.Mock };
 
   beforeEach(async () => {
     const serviceMock: Partial<jest.Mocked<StudentsService>> = {
       getStudent: jest.fn(),
       getStudentsByContact: jest.fn(),
       getStudentsByTutor: jest.fn(),
+      getStudentsByTutors: jest.fn(),
       getStudents: jest.fn(),
       getOnboardingStudents: jest.fn(),
       withContactNames: jest.fn(),
@@ -48,7 +51,13 @@ describe('StudentsController', () => {
     };
     const module: TestingModule = await Test.createTestingModule({
       controllers: [StudentsController],
-      providers: [{ provide: StudentsService, useValue: serviceMock }],
+      providers: [
+        { provide: StudentsService, useValue: serviceMock },
+        {
+          provide: TeamsService,
+          useValue: (teams = { resolveTeamTutorIds: jest.fn() }),
+        },
+      ],
     }).compile();
     controller = module.get(StudentsController);
     service = module.get(StudentsService);
@@ -56,6 +65,65 @@ describe('StudentsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('Team Roster (?team=self, client 2026-11-09)', () => {
+    it("lists a lead's team students, their own left out, with family names", async () => {
+      teams.resolveTeamTutorIds.mockResolvedValue(['c-m1', 'c-m2']);
+      service.getStudentsByTutors.mockResolvedValue([student]);
+      service.withContactNames.mockResolvedValue([
+        { ...student, contact_name: 'Deming', contact_email: '' },
+      ]);
+      const result = await controller.getStudents(
+        reqAs(lead),
+        '',
+        '',
+        '',
+        'contact_name',
+        'self',
+      );
+      expect(teams.resolveTeamTutorIds).toHaveBeenCalledWith('c-lead');
+      expect(service.getStudentsByTutors).toHaveBeenCalledWith(
+        ['c-m1', 'c-m2'],
+        'c-lead',
+      );
+      expect(result).toEqual([
+        expect.objectContaining({ contact_name: 'Deming' }),
+      ]);
+    });
+
+    it('returns the plain list without include', async () => {
+      teams.resolveTeamTutorIds.mockResolvedValue([]);
+      service.getStudentsByTutors.mockResolvedValue([]);
+      await expect(
+        controller.getStudents(reqAs(lead), '', '', '', '', 'self'),
+      ).resolves.toEqual([]);
+      expect(service.withContactNames).not.toHaveBeenCalled();
+    });
+
+    it('refuses a plain tutor and a lead with no contact id', async () => {
+      await expect(
+        controller.getStudents(reqAs(tutor), '', '', '', '', 'self'),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getStudents(
+          reqAs({ ...lead, contact: '' }),
+          '',
+          '',
+          '',
+          '',
+          'self',
+        ),
+      ).rejects.toThrow('Unauthorized');
+      expect(teams.resolveTeamTutorIds).not.toHaveBeenCalled();
+    });
+
+    it('an admin asking for team=self gets the ordinary admin listing', async () => {
+      service.getStudents.mockResolvedValue([student] as never);
+      await controller.getStudents(reqAs(admin), '', '', '', '', 'self');
+      expect(service.getStudents).toHaveBeenCalled();
+      expect(teams.resolveTeamTutorIds).not.toHaveBeenCalled();
+    });
   });
 
   describe('getStudents routing (admin only)', () => {

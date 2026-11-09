@@ -6,6 +6,8 @@ import { StudentsModel } from '../../src/models/students.model';
 import { NotesController } from '../../src/notes/notes.controller';
 import { NotesService } from '../../src/notes/notes.service';
 import { NotesModel } from '../../src/models/notes.model';
+import { TeamsService } from '../../src/teams/teams.service';
+import { TeamsModel } from '../../src/models/teams.model';
 import { ModelMock, scanResolves } from '../model-mock';
 import { bootIntegrationApp } from './helpers';
 
@@ -15,9 +17,13 @@ jest.mock('../../src/models/students.model', () => ({
 jest.mock('../../src/models/notes.model', () => ({
   NotesModel: require('../model-mock').makeModelMock(),
 }));
+jest.mock('../../src/models/teams.model', () => ({
+  TeamsModel: require('../model-mock').makeModelMock(),
+}));
 
 const StudentModel = StudentsModel as unknown as ModelMock;
 const NoteModel = NotesModel as unknown as ModelMock;
+const TeamModel = TeamsModel as unknown as ModelMock;
 
 describe('Students & Notes (integration, admin-only)', () => {
   let app: INestApplication;
@@ -25,7 +31,7 @@ describe('Students & Notes (integration, admin-only)', () => {
   beforeAll(async () => {
     app = await bootIntegrationApp({
       controllers: [StudentsController, NotesController],
-      providers: [StudentsService, NotesService],
+      providers: [StudentsService, NotesService, TeamsService],
     });
   });
 
@@ -34,6 +40,73 @@ describe('Students & Notes (integration, admin-only)', () => {
   });
 
   const server = () => app.getHttpServer();
+
+  describe('Team Roster (?team=self)', () => {
+    const lead = 'contact-lead';
+    beforeEach(() => {
+      jest.clearAllMocks();
+      scanResolves(TeamModel, [
+        {
+          id: 't-1',
+          lead_contact_id: lead,
+          member_contact_ids: ['contact-m1'],
+        },
+        {
+          id: 't-2',
+          lead_contact_id: 'contact-m1',
+          member_contact_ids: ['contact-m2'],
+        },
+      ]);
+      scanResolves(StudentModel, [
+        { id: 's-m1', assigned_tutor_id: 'contact-m1' },
+        { id: 's-m2', assigned_tutor_id: 'contact-m2' },
+        {
+          id: 's-slot',
+          assigned_tutor_id: 'contact-x',
+          schedule: [
+            {
+              weekday: 'MONDAY',
+              start_time: '1',
+              end_time: '2',
+              tutor_id: 'contact-m1',
+            },
+          ],
+        },
+        { id: 's-own', assigned_tutor_id: lead },
+        { id: 's-other', assigned_tutor_id: 'contact-x' },
+      ]);
+    });
+
+    it('a lead lists every student of their team, nested teams included, their own left out', async () => {
+      const res = await request(server())
+        .get('/students?team=self')
+        .set('x-test-role', 'lead');
+      expect(res.status).toBe(200);
+      expect(res.body.map((s: { id: string }) => s.id)).toEqual([
+        's-m1',
+        's-m2',
+        's-slot',
+      ]);
+    });
+
+    it('a lead with no team gets an empty roster', async () => {
+      scanResolves(TeamModel, []);
+      const res = await request(server())
+        .get('/students?team=self')
+        .set('x-test-role', 'lead');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('a plain tutor and support staff are refused', async () => {
+      for (const role of ['tutor', 'support', 'none']) {
+        const res = await request(server())
+          .get('/students?team=self')
+          .set('x-test-role', role);
+        expect(res.status).toBe(403);
+      }
+    });
+  });
 
   describe('students', () => {
     it('admin lists students', async () => {
