@@ -917,6 +917,13 @@ describe('StudentsService', () => {
       );
 
       it('rejects a start on or after the first scheduled change, sent or stored', async () => {
+        // The changes below must be in the future: pin the clock (the test
+        // started failing on 2026-11-01, when its first change passed).
+        jest.useFakeTimers({
+          now: new Date('2026-10-20T12:00:00.000Z'),
+          doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+        });
+        Model.get.mockResolvedValue(undefined);
         await expect(
           service.updateStudent(
             sampleStudent({
@@ -950,6 +957,7 @@ describe('StudentsService', () => {
           }),
         );
         expect(Model.update).toHaveBeenCalled();
+        jest.useRealTimers();
       });
 
       it('createStudent validates the same field', async () => {
