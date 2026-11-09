@@ -167,6 +167,23 @@ describe('Family page (integration)', () => {
     expect(res.body.students[0].make_up_pending).toBe(45);
   });
 
+  it('the Head Tutor opens any family and sees its current students only', async () => {
+    scanResolves(Students, [
+      own,
+      sibling,
+      { ...own, id: 'st-past', name: 'Past', status: 'Past Student' },
+    ]);
+    const res = await request(server())
+      .get('/family/fam-1')
+      .set('x-test-role', 'head');
+    expect(res.status).toBe(200);
+    expect(res.body.students.map((s: { id: string }) => s.id)).toEqual([
+      'st-own',
+      'st-sib',
+    ]);
+    expect(JSON.stringify(res.body)).not.toContain('billing');
+  });
+
   it('an admin sees every student of the family', async () => {
     const res = await request(server())
       .get('/family/fam-1')

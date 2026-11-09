@@ -31,6 +31,7 @@ export const VALID_USER_GROUPS = [
   'Admins',
   'Tutors',
   'LeadTutors',
+  'HeadTutors',
   'SupportStaff',
 ];
 
@@ -179,7 +180,7 @@ export class AuthService {
   private assertValidGroup(group: string): void {
     if (!group || !VALID_USER_GROUPS.includes(group)) {
       throw new BadRequestException(
-        'A valid group (Admins, Tutors, LeadTutors, or SupportStaff) is required to create a user.',
+        'A valid group (Admins, Tutors, LeadTutors, HeadTutors, or SupportStaff) is required to create a user.',
       );
     }
   }

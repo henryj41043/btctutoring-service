@@ -55,6 +55,8 @@ export interface FamilyViewer {
   contactId: string;
   /** Tutors whose students the viewer also sees (a lead's team, transitive). */
   teamTutorIds: string[];
+  /** The Head Tutor: every current student of every family (client 2026-11-09). */
+  allTutors?: boolean;
 }
 
 /** Statuses a non-admin sees: the students on someone's roster now. */
@@ -70,6 +72,7 @@ export function studentInScope(
 ): boolean {
   if (viewer.isAdmin) return true;
   if (!CURRENT_STATUSES.includes(student.status ?? '')) return false;
+  if (viewer.allTutors) return true;
   return [viewer.contactId, ...viewer.teamTutorIds]
     .filter(Boolean)
     .some((tutorId) => studentVisibleToTutor(student, tutorId));
