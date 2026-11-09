@@ -95,6 +95,8 @@ export interface StatementLine {
   flags: LineFlag[];
   /** Weekly families: the line's charge per Sunday–Saturday week. */
   weeks?: LineWeek[];
+  /** Monthly families: 15 when this student's month is due on the 15th. */
+  due_day?: 15;
 }
 
 /** One week of a weekly family's line. */
@@ -637,8 +639,15 @@ export function buildStatement(
   const cycle = cycleOf(contact.billing_cycle);
   const lines: StatementLine[] = [];
   let rawFirst = 0;
+  // Monthly families may pay a student's month on the 15th (client
+  // 2026-11-09): that student's lines are marked and summed apart.
+  let rawFifteenth = 0;
   for (const student of packaged) {
     const own = studentLines(student, year, month, catalog, cycle);
+    if (cycle === 'monthly' && dueOnFifteenth(student)) {
+      for (const line of own) line.due_day = 15;
+      rawFifteenth += own.reduce((sum, l) => sum + l.net, 0);
+    }
     lines.push(...own);
     const net = own.reduce((sum, l) => sum + l.net, 0);
     const kind = splitKindOf(own, year, month);
@@ -682,6 +691,17 @@ export function buildStatement(
       // The flat group fee lands on the 1st for semi-monthly families.
       derived.push({ day: 1, amount: round2(first + groupFee) });
       derived.push({ day: 15, amount: round2(discounted - first) });
+    } else if (packaged.some(dueOnFifteenth)) {
+      // Each student's month on their own day; the sibling discount is
+      // shared in proportion and the group fee lands on the 1st.
+      const firstShare =
+        subtotal > 0
+          ? round2((discounted * (subtotal - rawFifteenth)) / subtotal)
+          : 0;
+      if (packaged.some((s) => !dueOnFifteenth(s)) || groupFee > 0) {
+        derived.push({ day: 1, amount: round2(firstShare + groupFee) });
+      }
+      derived.push({ day: 15, amount: round2(discounted - firstShare) });
     } else {
       derived.push({ day: 1, amount: total });
     }
@@ -728,6 +748,11 @@ export function buildStatement(
     },
     records,
   );
+}
+
+/** True when a monthly family pays this student's month on the 15th. */
+export function dueOnFifteenth(student: Student): boolean {
+  return student.billing_due_day === 15;
 }
 
 /**

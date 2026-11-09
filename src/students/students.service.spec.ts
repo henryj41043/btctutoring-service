@@ -788,6 +788,79 @@ describe('StudentsService', () => {
       });
     });
 
+    describe('billing due day (client 2026-11-09)', () => {
+      const lastUpdate = () => Model.update.mock.calls.at(-1)![1];
+
+      it('stores the 15th', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({
+          id: 's-1',
+          billing_due_day: 15,
+        } as unknown as Student);
+        expect(lastUpdate()).toEqual({ billing_due_day: 15 });
+      });
+
+      it.each([[1], [null]])(
+        'back to the 1st (%p) removes the stored day',
+        async (day) => {
+          Model.update.mockResolvedValue({});
+          await service.updateStudent({
+            id: 's-1',
+            billing_due_day: day,
+          } as unknown as Student);
+          expect(lastUpdate()).toEqual({
+            $SET: {},
+            $REMOVE: ['billing_due_day'],
+          });
+        },
+      );
+
+      it('an absent day leaves the stored one alone', async () => {
+        Model.update.mockResolvedValue({});
+        await service.updateStudent({ id: 's-1', name: 'Pat' } as Student);
+        expect(lastUpdate()).toEqual({ name: 'Pat' });
+      });
+
+      it.each([[2], [0], ['15'], [true], [31]])(
+        'rejects the due day %p before writing',
+        async (day) => {
+          await expect(
+            service.updateStudent({
+              id: 's-1',
+              billing_due_day: day,
+            } as unknown as Student),
+          ).rejects.toThrow(
+            'billing_due_day must be 1 or 15, or null for the 1st.',
+          );
+          expect(Model.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('createStudent stores the 15th only and validates', async () => {
+        Model.__save.mockResolvedValue({});
+        await service.createStudent({
+          name: 'Pat',
+          billing_due_day: 15,
+        } as unknown as Student);
+        expect(Model.mock.calls.at(-1)![0]).toEqual(
+          expect.objectContaining({ billing_due_day: 15 }),
+        );
+        await service.createStudent({
+          name: 'Pat',
+          billing_due_day: 1,
+        } as unknown as Student);
+        expect(Model.mock.calls.at(-1)![0]).not.toHaveProperty(
+          'billing_due_day',
+        );
+        await expect(
+          service.createStudent({
+            name: 'Pat',
+            billing_due_day: 10,
+          } as unknown as Student),
+        ).rejects.toThrow('billing_due_day must be 1 or 15');
+      });
+    });
+
     describe('service end date', () => {
       const lastUpdate = () => Model.update.mock.calls.at(-1)![1];
 

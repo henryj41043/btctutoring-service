@@ -109,6 +109,44 @@ describe('Billing statements (integration)', () => {
     expect(res.body[0].dues[0].paid).toBe(true);
   });
 
+  it('a child due on the 15th gets its own due, with its own paid record', async () => {
+    scanResolves(Students, [
+      { ...pat, package_start_date: '2026-05-01T00:00:00' },
+      {
+        ...pat,
+        id: 's-2',
+        name: 'Sam',
+        package_start_date: '2026-05-01T00:00:00',
+        billing_due_day: 15,
+      },
+    ]);
+    scanResolves(Billing, [
+      { contact_id: 'c-1', period_start: '2026-09-15', paid: true },
+    ]);
+
+    const res = await request(server())
+      .get('/billing/statements?month=2026-09')
+      .set('x-test-role', 'admin');
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].cycle).toBe('monthly');
+    expect(
+      res.body[0].dues.map(
+        (d: { day: number; amount: number; paid: boolean }) => [
+          d.day,
+          d.amount,
+          d.paid,
+        ],
+      ),
+    ).toEqual([
+      [1, 273, false],
+      [15, 273, true],
+    ]);
+    expect(res.body[0].lines[1]).toEqual(
+      expect.objectContaining({ student_name: 'Sam', due_day: 15 }),
+    );
+  });
+
   it('rejects a malformed month', async () => {
     const res = await request(server())
       .get('/billing/statements?month=2026-9')
