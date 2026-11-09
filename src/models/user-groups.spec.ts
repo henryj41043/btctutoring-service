@@ -1,5 +1,6 @@
 import {
   isCurrentAdmin,
+  isHeadTutor,
   isLeadTutor,
   isSupportStaff,
   isTutorLike,
@@ -13,6 +14,7 @@ describe('user-groups predicates', () => {
     [[], false],
     [['Tutors', 'LeadTutors'], true],
     [['SupportStaff'], false],
+    [['HeadTutors'], true],
   ])('isTutorLike(%j) -> %s', (groups, expected) => {
     expect(isTutorLike(groups)).toBe(expected);
   });
@@ -28,11 +30,22 @@ describe('user-groups predicates', () => {
 
   it.each([
     [['LeadTutors'], true],
+    [['HeadTutors'], true],
     [['Tutors'], false],
     [['Admins'], false],
     [[], false],
   ])('isLeadTutor(%j) -> %s', (groups, expected) => {
     expect(isLeadTutor(groups)).toBe(expected);
+  });
+
+  it.each([
+    [['HeadTutors'], true],
+    [['LeadTutors'], false],
+    [['Tutors'], false],
+    [['Admins'], false],
+    [[], false],
+  ])('isHeadTutor(%j) -> %s', (groups, expected) => {
+    expect(isHeadTutor(groups)).toBe(expected);
   });
 
   describe('isCurrentAdmin', () => {

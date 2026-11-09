@@ -11,7 +11,7 @@ import { Contact } from '../models/contact.model';
 import { Student } from '../models/student.model';
 import { Session, SessionType } from '../models/session.model';
 import { User } from '../models/user.model';
-import { isLeadTutor, isTutorLike } from '../models/user-groups';
+import { isHeadTutor, isLeadTutor, isTutorLike } from '../models/user-groups';
 import { TeamsService } from '../teams/teams.service';
 import { SESSION_STATUS, sessionMinutes } from '../sessions/attendance';
 import {
@@ -50,6 +50,7 @@ export class FamilyService {
         !isAdmin && isLeadTutor(groups)
           ? await this.teamsService.resolveTeamTutorIds(user.contact)
           : [],
+      allTutors: !isAdmin && isHeadTutor(groups),
     };
     const students = (await StudentsModel.scan({
       contact_id: { eq: contactId },

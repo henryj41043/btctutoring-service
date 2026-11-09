@@ -41,6 +41,34 @@ describe('Students & Notes (integration, admin-only)', () => {
 
   const server = () => app.getHttpServer();
 
+  describe('Head Tutor org roster', () => {
+    it('lists every student without prices or discounts; other readers are refused', async () => {
+      scanResolves(StudentModel, [
+        {
+          id: 's-1',
+          name: 'Pat',
+          status: 'Active Student',
+          price_override: 400,
+          discount_percent: 10,
+          pending_changes: [],
+        },
+      ]);
+      const res = await request(server())
+        .get('/students')
+        .set('x-test-role', 'head');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([
+        { id: 's-1', name: 'Pat', status: 'Active Student' },
+      ]);
+      for (const role of ['lead', 'tutor', 'support']) {
+        const refused = await request(server())
+          .get('/students')
+          .set('x-test-role', role);
+        expect(refused.status).toBe(403);
+      }
+    });
+  });
+
   describe('Team Roster (?team=self)', () => {
     const lead = 'contact-lead';
     beforeEach(() => {

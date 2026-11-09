@@ -25,6 +25,12 @@ const lead: User = {
   groups: ['LeadTutors'],
   contact: 'c-lead',
 };
+const head: User = {
+  username: 'head',
+  email: 'head@example.com',
+  groups: ['HeadTutors'],
+  contact: 'c-head',
+};
 const reqAs = (user: User): express.Request =>
   ({ user }) as unknown as express.Request;
 
@@ -65,6 +71,83 @@ describe('StudentsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('Head Tutor org roster (client 2026-11-09)', () => {
+    const priced = {
+      ...student,
+      contact_id: 'fam-1',
+      price_override: 400,
+    } as unknown as Student;
+
+    it('lists every student, projected to roster fields, with family names', async () => {
+      service.getStudents.mockResolvedValue([priced] as never);
+      service.withContactNames.mockImplementation((rows) =>
+        Promise.resolve(
+          rows.map((r) => ({
+            ...r,
+            contact_name: 'Deming',
+            contact_email: '',
+          })),
+        ),
+      );
+      const result = (await controller.getStudents(
+        reqAs(head),
+        '',
+        '',
+        '',
+        'contact_name',
+      )) as Record<string, unknown>[];
+      expect(result).toEqual([
+        {
+          id: 'student-1',
+          name: 'Pat',
+          contact_id: 'fam-1',
+          contact_name: 'Deming',
+          contact_email: '',
+        },
+      ]);
+      expect(result[0]).not.toHaveProperty('price_override');
+    });
+
+    it('returns the projected list without names when not asked', async () => {
+      service.getStudents.mockResolvedValue([priced] as never);
+      const result = (await controller.getStudents(
+        reqAs(head),
+        '',
+        '',
+        '',
+        '',
+      )) as Record<string, unknown>[];
+      expect(result[0]).not.toHaveProperty('price_override');
+      expect(service.withContactNames).not.toHaveBeenCalled();
+    });
+
+    it('a single-student or by-family read stays admin-only for the Head Tutor', async () => {
+      await expect(
+        controller.getStudents(reqAs(head), 'student-1', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      await expect(
+        controller.getStudents(reqAs(head), '', 'fam-1', '', ''),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getStudents).not.toHaveBeenCalled();
+    });
+
+    it('the Head Tutor keeps their own roster and their Team Roster', async () => {
+      service.getStudentsByTutor.mockResolvedValue([] as never);
+      await controller.getStudents(reqAs(head), '', '', 'c-head', '');
+      expect(service.getStudentsByTutor).toHaveBeenCalledWith('c-head');
+      teams.resolveTeamTutorIds.mockResolvedValue([]);
+      service.getStudentsByTutors.mockResolvedValue([]);
+      await controller.getStudents(reqAs(head), '', '', '', '', 'self');
+      expect(teams.resolveTeamTutorIds).toHaveBeenCalledWith('c-head');
+    });
+
+    it('a Lead Tutor does not get the org roster', async () => {
+      await expect(
+        controller.getStudents(reqAs(lead), '', '', '', ''),
+      ).rejects.toThrow('Unauthorized');
+    });
   });
 
   describe('Team Roster (?team=self, client 2026-11-09)', () => {

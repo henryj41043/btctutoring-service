@@ -36,6 +36,13 @@ export const LEAD_USER: User = {
   contact: 'contact-lead',
 };
 
+export const HEAD_USER: User = {
+  username: 'head',
+  email: 'head@example.com',
+  groups: ['HeadTutors'],
+  contact: 'contact-head',
+};
+
 export const SUPPORT_USER: User = {
   username: 'support',
   email: 'support@example.com',
@@ -60,6 +67,9 @@ export const testAuthGuard = {
         break;
       case 'support':
         req.user = SUPPORT_USER;
+        break;
+      case 'head':
+        req.user = HEAD_USER;
         break;
       case 'none':
         req.user = STRANGER_USER;

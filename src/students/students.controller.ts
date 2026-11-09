@@ -17,7 +17,8 @@ import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
 import { Student } from '../models/student.model';
-import { isLeadTutor, isTutorLike } from '../models/user-groups';
+import { isHeadTutor, isLeadTutor, isTutorLike } from '../models/user-groups';
+import { rosterProjection } from './roster-projection';
 import { TeamsService } from '../teams/teams.service';
 
 @Controller('students')
@@ -73,6 +74,24 @@ export class StudentsController {
         members,
         user.contact,
       )) as unknown as Student[];
+      return withNames
+        ? this.studentsService.withContactNames(students)
+        : students;
+    }
+    // The Head Tutor: the whole organization's Student Roster, read-only and
+    // projected to the roster's fields (no prices, discounts or pending
+    // changes), for parent check-ins (client 2026-11-09).
+    if (
+      !isAdmin &&
+      isHeadTutor(groups) &&
+      !id &&
+      !contactId &&
+      !tutorId &&
+      !team
+    ) {
+      const students = (
+        (await this.studentsService.getStudents()) as unknown as Student[]
+      ).map(rosterProjection);
       return withNames
         ? this.studentsService.withContactNames(students)
         : students;
