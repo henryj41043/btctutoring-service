@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException } from '@nestjs/common';
 import express from 'express';
 import { ADMIN_TIME_MESSAGE, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
@@ -73,6 +74,8 @@ describe('SessionsController', () => {
       createMakeupSet: jest.fn(),
       createSession: jest.fn(),
       createSessions: jest.fn(),
+      createSessionsChecked: jest.fn(),
+      assertNoConflicts: jest.fn(),
       updateSession: jest.fn(),
       deleteSession: jest.fn(),
     };
@@ -626,9 +629,54 @@ describe('SessionsController', () => {
       expect(service.getSessionById).not.toHaveBeenCalled();
     });
 
-    it('admin batch-creates sessions', async () => {
+    it('admin batch-creates sessions through the double-booking check', async () => {
       await controller.createSessions(reqAs(admin), [session()]);
-      expect(service.createSessions).toHaveBeenCalled();
+      expect(service.createSessionsChecked).toHaveBeenCalledWith([session()]);
+      expect(service.createSessions).not.toHaveBeenCalled();
+    });
+
+    describe('double-booking on edit', () => {
+      it('checks a moved session against the others, leaving out its stored copy', async () => {
+        service.getSessionById.mockResolvedValue(session());
+        await controller.updateSession(
+          reqAs(admin),
+          session({
+            start_datetime: '2026-01-01T12:00:00Z',
+            end_datetime: '2026-01-01T13:00:00Z',
+          }),
+        );
+        expect(service.assertNoConflicts).toHaveBeenCalledWith(
+          [
+            expect.objectContaining({
+              id: 's-1',
+              start_datetime: '2026-01-01T12:00:00Z',
+            }),
+          ],
+          ['s-1'],
+        );
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+
+      it('never checks an edit that leaves the slot alone', async () => {
+        service.getSessionById.mockResolvedValue(session());
+        await controller.updateSession(reqAs(admin), session({ notes: 'new' }));
+        expect(service.assertNoConflicts).not.toHaveBeenCalled();
+        expect(service.updateSession).toHaveBeenCalled();
+      });
+
+      it('refuses the edit when the move would double-book', async () => {
+        service.getSessionById.mockResolvedValue(session());
+        service.assertNoConflicts.mockRejectedValue(
+          new ConflictException('Tess already has a session'),
+        );
+        await expect(
+          controller.updateSession(
+            reqAs(admin),
+            session({ tutor_id: 'other-tutor' }),
+          ),
+        ).rejects.toThrow('Tess already has a session');
+        expect(service.updateSession).not.toHaveBeenCalled();
+      });
     });
 
     it('non-admin cannot batch-create sessions', async () => {

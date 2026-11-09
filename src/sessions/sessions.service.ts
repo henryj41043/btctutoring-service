@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -36,6 +37,12 @@ import { Student } from '../models/student.model';
 import { Contact } from '../models/contact.model';
 import { randomUUID } from 'crypto';
 import { brandedEmail } from '../notifications/email-template';
+import {
+  conflictSummary,
+  conflictWindow,
+  findConflicts,
+  SessionConflict,
+} from './session-conflicts';
 
 /** PUT /sessions/:id/attendance payload. */
 export class AttendanceRequest {
@@ -363,6 +370,40 @@ export class SessionsService {
   }
 
   /**
+   * The candidates that would double-book a tutor or a student (see
+   * session-conflicts.ts). One scan of the sessions around their times;
+   * `ignoreIds` leaves out the stored copy of a session being edited.
+   */
+  async findSessionConflicts(
+    candidates: Session[],
+    ignoreIds: string[] = [],
+  ): Promise<SessionConflict[]> {
+    const window = conflictWindow(candidates);
+    if (!window) return [];
+    const booked = (await this.getAllSessions(window)) as unknown as Session[];
+    return findConflicts(candidates, booked, ignoreIds);
+  }
+
+  /** Refuses (409) candidates that double-book a tutor or a student. */
+  async assertNoConflicts(
+    candidates: Session[],
+    ignoreIds: string[] = [],
+  ): Promise<void> {
+    const hits = await this.findSessionConflicts(candidates, ignoreIds);
+    if (hits.length === 0) return;
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'Conflict',
+      message: conflictSummary(hits),
+      conflicts: hits.map((hit) => ({
+        index: hit.index,
+        session_id: hit.existing.id,
+        message: hit.message,
+      })),
+    });
+  }
+
+  /**
    * Plans, and unless `dryRun` creates, a set of make-ups for one student.
    * The browser proposes the dates; the minutes decide which are scheduled
    * (see planMakeupSet). An admin may create a set for any tutor; a tutor or
@@ -449,7 +490,30 @@ export class SessionsService {
         return Promise.reject(err);
       })) as unknown as Session[];
 
-    const plan = planMakeupSet(student, pending, candidates, now);
+    // A make-up that would double-book the tutor or the student is skipped
+    // with the reason, like one the minutes cannot cover.
+    const conflicts = await this.findSessionConflicts(
+      candidates.map(
+        (candidate) =>
+          ({
+            type: SessionType.MAKE_UP,
+            status: SESSION_STATUS.PENDING,
+            start_datetime: candidate.start_datetime,
+            end_datetime: candidate.end_datetime,
+            student_id: student.id,
+            student_name: student.name,
+            tutor_id: request.tutor_id,
+            tutor_name: request.tutor_name,
+          }) as unknown as Session,
+      ),
+    );
+    const plan = planMakeupSet(
+      student,
+      pending,
+      candidates,
+      now,
+      new Map(conflicts.map((hit) => [hit.index, hit.message])),
+    );
     if (dryRun || plan.accepted.length === 0) {
       return { ...plan, dry_run: dryRun, created: 0, ids: [] };
     }
@@ -496,6 +560,7 @@ export class SessionsService {
   }
 
   async createSession(session: Session) {
+    await this.assertNoConflicts([session]);
     const newUuid: string = randomUUID();
     const newSession = new SessionsModel({
       id: newUuid,
@@ -523,6 +588,17 @@ export class SessionsService {
         Logger.error(err.message, err);
         return Promise.reject(err);
       });
+  }
+
+  /**
+   * The admin batch endpoint (schedules created in the browser): refuses the
+   * whole batch when any session would double-book. The daily horizon fill
+   * and auto-renew call createSessions directly: the weekly schedule is the
+   * source of truth there, so they are not checked.
+   */
+  async createSessionsChecked(sessions: Session[]) {
+    await this.assertNoConflicts(sessions);
+    return this.createSessions(sessions);
   }
 
   async createSessions(sessions: Session[]) {

@@ -32,12 +32,17 @@ export interface MakeupCandidate {
  * exist today but lapse before that date; or the date is after the student's
  * last day of service.
  */
-export type MakeupSkipReason = 'insufficient' | 'expired' | 'after_service_end';
+export type MakeupSkipReason =
+  | 'insufficient'
+  | 'expired'
+  | 'after_service_end'
+  | 'conflict';
 
 export interface MakeupSetPlan {
   /** Indexes (into the candidates given) that the minutes cover. */
   accepted: number[];
-  skipped: { index: number; reason: MakeupSkipReason }[];
+  /** `message` explains a 'conflict' (what is already booked then). */
+  skipped: { index: number; reason: MakeupSkipReason; message?: string }[];
   /** Minutes the accepted make-ups commit. */
   minutes_used: number;
   /** Left to schedule afterwards: today's balance less everything pending. */
@@ -94,6 +99,8 @@ export function planMakeupSet(
   existingPending: Session[],
   candidates: MakeupCandidate[],
   now: Date = new Date(),
+  /** Candidate index → why it would double-book (session-conflicts.ts). */
+  conflicts: Map<number, string> = new Map(),
 ): MakeupSetPlan {
   const existing: Step[] = existingPending.map((session) => ({
     at: new Date(session.start_datetime),
@@ -126,7 +133,14 @@ export function planMakeupSet(
   const kept: Step[] = [];
   const skipped: MakeupSetPlan['skipped'] = [];
   for (const step of proposed) {
-    if (serviceEnd && step.at.getTime() > serviceEnd.getTime()) {
+    const conflict = conflicts.get(step.index!);
+    if (conflict !== undefined) {
+      skipped.push({
+        index: step.index!,
+        reason: 'conflict',
+        message: conflict,
+      });
+    } else if (serviceEnd && step.at.getTime() > serviceEnd.getTime()) {
       skipped.push({ index: step.index!, reason: 'after_service_end' });
     } else if (step.minutes > 0 && fits(student, kept, step)) {
       kept.push(step);
