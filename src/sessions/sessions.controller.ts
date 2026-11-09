@@ -28,6 +28,7 @@ import {
   lockedFieldChanges,
 } from './attendance';
 import { TeamsService } from '../teams/teams.service';
+import { definedFields, movesSlot } from './session-conflicts';
 import { AuthGuard } from '@nestjs/passport';
 import express from 'express';
 import { User } from '../models/user.model';
@@ -237,7 +238,7 @@ export class SessionsController {
     const user: User = req.user as User;
     const isAdmin: boolean = (user.groups ?? []).includes('Admins');
     if (isAdmin) {
-      return this.sessionsService.createSessions(sessions);
+      return this.sessionsService.createSessionsChecked(sessions);
     } else {
       Logger.error('Creating sessions is restricted to admins');
       throw new ForbiddenException('Unauthorized');
@@ -336,6 +337,15 @@ export class SessionsController {
         `Session ${session.id}: refused a type change by a non-admin`,
       );
       throw new ForbiddenException(SESSION_TYPE_LOCKED_MESSAGE);
+    }
+    // Moving a session (time, tutor or students) must not double-book; an
+    // edit that leaves the slot alone (notes, names) is never refused, even
+    // where an older overlap already exists.
+    if (stored && movesSlot(stored, session)) {
+      await this.sessionsService.assertNoConflicts(
+        [{ ...stored, ...definedFields(session) } as Session],
+        stored.id ? [stored.id] : [],
+      );
     }
     return this.sessionsService.updateSession(session);
   }

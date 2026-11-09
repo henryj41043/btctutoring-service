@@ -260,4 +260,21 @@ describe('planMakeupSet', () => {
     );
     expect(plan.accepted).toEqual([0]);
   });
+  it('skips a date that would double-book, before any minute check', () => {
+    const plan = planMakeupSet(
+      student({ make_up_batches: [earned(1, 60)] }),
+      [],
+      [day(1, 15), day(8, 15)],
+      NOW,
+      new Map([[0, 'Tess already has a session then.']]),
+    );
+    expect(plan.accepted).toEqual([1]);
+    expect(plan.skipped).toEqual([
+      {
+        index: 0,
+        reason: 'conflict',
+        message: 'Tess already has a session then.',
+      },
+    ]);
+  });
 });

@@ -732,4 +732,135 @@ describe('Sessions (integration)', () => {
       expect(missing.status).toBe(404);
     });
   });
+
+  describe('double-booking guard', () => {
+    // The client's screenshot: Emily + Graham's make-up, Oct 23 10:00 ET.
+    const booked = {
+      id: 'booked-1',
+      type: 'MAKE_UP',
+      status: 'Pending',
+      start_datetime: '2026-10-23T14:00:00.000Z',
+      end_datetime: '2026-10-23T14:45:00.000Z',
+      tutor_id: 'contact-tutor',
+      tutor_name: 'Emily Sentman',
+      student_id: 'st-graham',
+      student_name: 'Graham Burdick',
+    };
+    const copy = (over: object = {}) => {
+      const rest: Partial<typeof booked> = { ...booked };
+      delete rest.id;
+      return { ...rest, ...over };
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      Model.__save.mockResolvedValue(undefined);
+      Model.batchPut.mockResolvedValue(undefined);
+      Model.update.mockResolvedValue({});
+    });
+
+    it('a tutor cannot book the same make-up twice (409 naming the clash)', async () => {
+      scanResolves(Model, [booked]);
+      const res = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send(copy());
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe(
+        'Emily Sentman already has a make-up with Graham Burdick from 10:00 AM to 10:45 AM on Fri, Oct 23.',
+      );
+      expect(res.body.conflicts).toEqual([
+        expect.objectContaining({ index: 0, session_id: 'booked-1' }),
+      ]);
+      expect(Model.__save).not.toHaveBeenCalled();
+    });
+
+    it('an admin is refused an overlapping session for the same student too', async () => {
+      scanResolves(Model, [booked]);
+      const res = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'admin')
+        .send(
+          copy({
+            type: 'TUTORING',
+            tutor_id: 'contact-other',
+            start_datetime: '2026-10-23T14:30:00.000Z',
+            end_datetime: '2026-10-23T15:15:00.000Z',
+          }),
+        );
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/^Graham Burdick already has a make-up/);
+    });
+
+    it('back-to-back and over a cancelled session are fine', async () => {
+      scanResolves(Model, [
+        booked,
+        {
+          ...booked,
+          id: 'c-1',
+          status: 'Cancelled',
+          start_datetime: '2026-10-23T15:00:00.000Z',
+          end_datetime: '2026-10-23T15:45:00.000Z',
+        },
+      ]);
+      const next = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send(
+          copy({
+            start_datetime: '2026-10-23T14:45:00.000Z',
+            end_datetime: '2026-10-23T15:30:00.000Z',
+          }),
+        );
+      expect(next.status).toBe(201);
+    });
+
+    it('the admin batch refuses a schedule that double-books, writing nothing', async () => {
+      scanResolves(Model, [booked]);
+      const res = await request(server())
+        .post('/sessions/batch')
+        .set('x-test-role', 'admin')
+        .send([copy({ type: 'TUTORING' })]);
+      expect(res.status).toBe(409);
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('moving a session onto a booked slot is refused; editing its notes is not', async () => {
+      const mine = {
+        ...booked,
+        id: 'mine-1',
+        start_datetime: '2026-10-23T16:00:00.000Z',
+        end_datetime: '2026-10-23T16:45:00.000Z',
+      };
+      Model.get.mockResolvedValue(mine);
+      scanResolves(Model, [booked, mine]);
+      const move = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({
+          ...mine,
+          start_datetime: booked.start_datetime,
+          end_datetime: booked.end_datetime,
+        });
+      expect(move.status).toBe(409);
+      expect(Model.update).not.toHaveBeenCalled();
+
+      const notes = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...mine, notes: 'bring flashcards' });
+      expect(notes.status).toBe(200);
+      expect(Model.update).toHaveBeenCalled();
+    });
+
+    it('re-saving a session in its own slot is not a clash with itself', async () => {
+      Model.get.mockResolvedValue(booked);
+      scanResolves(Model, [booked]);
+      const res = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...booked, end_datetime: '2026-10-23T15:00:00.000Z' });
+      expect(res.status).toBe(200);
+    });
+  });
 });

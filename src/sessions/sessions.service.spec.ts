@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SessionsService } from './sessions.service';
 import { SessionsModel } from '../models/sessions.model';
 import { StudentsModel } from '../models/students.model';
@@ -591,7 +595,155 @@ describe('SessionsService', () => {
     });
   });
 
+  describe('double-booking guard', () => {
+    // The client's case: the same make-up booked twice (Oct 23, 10:00 ET).
+    const booked = sampleSession({
+      id: 'booked-1',
+      type: SessionType.MAKE_UP,
+      start_datetime: '2026-10-23T14:00:00.000Z',
+      end_datetime: '2026-10-23T14:45:00.000Z',
+      tutor_id: 't-emily',
+      tutor_name: 'Emily Sentman',
+      student_id: 'st-graham',
+      student_name: 'Graham Burdick',
+    });
+    const copy = (over: Partial<Session> = {}) =>
+      ({ ...booked, id: undefined, ...over }) as Session;
+    const DUPLICATE =
+      'Emily Sentman already has a make-up with Graham Burdick from 10:00 AM to 10:45 AM on Fri, Oct 23.';
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      Model.__save.mockResolvedValue(undefined);
+      Model.batchPut.mockResolvedValue(undefined);
+    });
+
+    it('scans only the window around the candidates', async () => {
+      const chain = scanResolves(Model, []);
+      await expect(service.findSessionConflicts([copy()])).resolves.toEqual([]);
+      expect(Model.scan).toHaveBeenCalledWith();
+      expect(chain.where).toHaveBeenCalledWith('start_datetime');
+      expect(chain.between).toHaveBeenCalledWith(
+        '2026-10-22T14:00:00.000Z',
+        '2026-10-23T14:45:00.000Z',
+      );
+    });
+
+    it('does not scan for a cancelled candidate', async () => {
+      await expect(
+        service.findSessionConflicts([copy({ status: 'Cancelled' })]),
+      ).resolves.toEqual([]);
+      expect(Model.scan).not.toHaveBeenCalled();
+    });
+
+    it('createSession refuses the duplicate with a 409 naming the clash, writing nothing', async () => {
+      scanResolves(Model, [booked]);
+      const error = await service.createSession(copy()).catch((e) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: DUPLICATE,
+        conflicts: [{ index: 0, session_id: 'booked-1', message: DUPLICATE }],
+      });
+      expect(Model.__save).not.toHaveBeenCalled();
+    });
+
+    it('createSession saves a back-to-back session', async () => {
+      scanResolves(Model, [booked]);
+      await service.createSession(
+        copy({
+          start_datetime: '2026-10-23T14:45:00.000Z',
+          end_datetime: '2026-10-23T15:30:00.000Z',
+        }),
+      );
+      expect(Model.__save).toHaveBeenCalledTimes(1);
+    });
+
+    it('createSessionsChecked refuses the whole batch when one session clashes', async () => {
+      scanResolves(Model, [booked]);
+      const other = copy({
+        tutor_id: 't-x',
+        student_id: 'st-x',
+        start_datetime: '2026-10-24T14:00:00.000Z',
+        end_datetime: '2026-10-24T15:00:00.000Z',
+      });
+      await expect(
+        service.createSessionsChecked([other, copy()]),
+      ).rejects.toThrow(DUPLICATE);
+      expect(Model.batchPut).not.toHaveBeenCalled();
+    });
+
+    it('createSessionsChecked writes a clean batch', async () => {
+      scanResolves(Model, []);
+      const result = await service.createSessionsChecked([copy()]);
+      expect(result.count).toBe(1);
+      expect(Model.batchPut).toHaveBeenCalledTimes(1);
+    });
+
+    it('createSessions (the daily fill and auto-renew) is never checked', async () => {
+      await service.createSessions([copy()]);
+      expect(Model.scan).not.toHaveBeenCalled();
+      expect(Model.batchPut).toHaveBeenCalledTimes(1);
+    });
+
+    it('a make-up set skips the dates that would double-book, with the reason', async () => {
+      Students.get.mockResolvedValue({
+        id: 'st-graham',
+        name: 'Graham Burdick',
+        status: 'Active Student',
+        assigned_tutor_id: 't-emily',
+        make_up_batches: [
+          { minutes: 120, earned_date: '2026-10-20T12:00:00.000Z' },
+        ],
+      });
+      // First scan: the student's pending make-ups; second: the window.
+      const exec = jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([booked]);
+      const chain = scanResolves(Model, []);
+      chain.exec = exec;
+      const result = await service.createMakeupSet(
+        {
+          student_id: 'st-graham',
+          tutor_id: 't-emily',
+          tutor_name: 'Emily Sentman',
+          sessions: [
+            {
+              start_datetime: booked.start_datetime,
+              end_datetime: booked.end_datetime,
+            },
+            {
+              start_datetime: '2026-10-30T14:00:00.000Z',
+              end_datetime: '2026-10-30T14:45:00.000Z',
+            },
+          ],
+        },
+        {
+          username: 'e',
+          email: 'e@x',
+          groups: ['Tutors'],
+          contact: 't-emily',
+        },
+        { now: new Date('2026-10-21T12:00:00.000Z') },
+      );
+      expect(result.accepted).toEqual([1]);
+      expect(result.skipped).toEqual([
+        { index: 0, reason: 'conflict', message: DUPLICATE },
+      ]);
+      expect(result.created).toBe(1);
+      expect(Model.batchPut.mock.calls[0][0]).toHaveLength(1);
+    });
+  });
+
   describe('createSession', () => {
+    // Nothing booked around the new session: the double-booking scan is empty.
+    beforeEach(() => {
+      scanResolves(Model, []);
+    });
+
     it('saves a session and returns a generated id', async () => {
       Model.__save.mockResolvedValue(undefined);
       const result = await service.createSession(sampleSession());
