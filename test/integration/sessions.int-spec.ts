@@ -317,6 +317,99 @@ describe('Sessions (integration)', () => {
     expect(denied.status).toBe(403);
   });
 
+  describe('tutor Admin Time (client 2026-11-09)', () => {
+    const adminTime = {
+      id: 'ta-1',
+      type: 'ADMIN',
+      tutor_id: 'contact-tutor',
+      tutor_name: 'Tess',
+      status: 'Pending',
+      start_datetime: '2026-11-10T15:00:00.000Z',
+      end_datetime: '2026-11-10T16:00:00.000Z',
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      Model.__save.mockResolvedValue(undefined);
+      Model.update.mockResolvedValue({});
+      Model.delete.mockResolvedValue(undefined);
+    });
+
+    it('a tutor or lead logs their own Admin Time, never for someone else or with a student', async () => {
+      const own = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, id: undefined });
+      expect(own.status).toBe(201);
+      const lead = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'lead')
+        .send({ ...adminTime, id: undefined, tutor_id: 'contact-lead' });
+      expect(lead.status).toBe(201);
+      const forOther = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, id: undefined, tutor_id: 'contact-other' });
+      expect(forOther.status).toBe(403);
+      const withStudent = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, id: undefined, student_id: 'st-1' });
+      expect(withStudent.status).toBe(403);
+      expect(Model.__save).toHaveBeenCalledTimes(2);
+    });
+
+    it('a tutor still cannot create tutoring sessions', async () => {
+      const res = await request(server())
+        .post('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, id: undefined, type: 'TUTORING' });
+      expect(res.status).toBe(403);
+    });
+
+    it('a tutor edits their own Admin Time but cannot attach a student to it', async () => {
+      Model.get.mockResolvedValue(adminTime);
+      const ok = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, notes: 'Lesson planning' });
+      expect(ok.status).toBe(200);
+      const attach = await request(server())
+        .put('/sessions')
+        .set('x-test-role', 'tutor')
+        .send({ ...adminTime, student_id: 'st-1' });
+      expect(attach.status).toBe(403);
+      expect(attach.body.message).toBe(
+        'Admin Time belongs to the tutor who logged it and has no student.',
+      );
+      expect(Model.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('a tutor deletes their own Admin Time only', async () => {
+      Model.get.mockResolvedValueOnce(adminTime);
+      const own = await request(server())
+        .delete('/sessions/ta-1')
+        .set('x-test-role', 'tutor');
+      expect(own.status).toBe(200);
+
+      Model.get.mockResolvedValueOnce({ ...adminTime, type: 'MAKE_UP' });
+      const makeup = await request(server())
+        .delete('/sessions/ta-1')
+        .set('x-test-role', 'tutor');
+      expect(makeup.status).toBe(403);
+
+      Model.get.mockResolvedValueOnce({
+        ...adminTime,
+        tutor_id: 'contact-other',
+      });
+      const other = await request(server())
+        .delete('/sessions/ta-1')
+        .set('x-test-role', 'tutor');
+      expect(other.status).toBe(403);
+      expect(Model.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('support staff', () => {
     const adminTime = {
       id: 'a-1',

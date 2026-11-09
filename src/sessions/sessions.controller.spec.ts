@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import express from 'express';
-import { SessionsController } from './sessions.controller';
+import { ADMIN_TIME_MESSAGE, SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { TeamsService } from '../teams/teams.service';
 import { User } from '../models/user.model';
@@ -907,6 +907,106 @@ describe('SessionsController', () => {
         controller.deleteSession(reqAs(tutor), 's-1'),
       ).rejects.toThrow('Unauthorized');
       expect(service.deleteSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tutor Admin Time (client 2026-11-09)', () => {
+    const adminTime = (overrides: Partial<Session> = {}): Session =>
+      session({
+        id: 'ta-1',
+        type: SessionType.ADMIN,
+        tutor_id: 'c-tutor',
+        student_id: undefined,
+        ...overrides,
+      });
+
+    it('a tutor and a lead create their own Admin Time', async () => {
+      await controller.createSession(reqAs(tutor), adminTime());
+      await controller.createSession(
+        reqAs(lead),
+        adminTime({ tutor_id: 'c-lead' }),
+      );
+      expect(service.createSession).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ["someone else's Admin Time", { tutor_id: 'c-other' }],
+      ['Admin Time with a student', { student_id: 'st-1' }],
+      [
+        'Admin Time with participants',
+        { participants: [{ id: 'st-1', name: 'S' }] },
+      ],
+      ['a tutoring session', { type: SessionType.TUTORING }],
+    ])('a tutor cannot create %s', async (_label, overrides) => {
+      await expect(
+        controller.createSession(reqAs(tutor), adminTime(overrides)),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.createSession).not.toHaveBeenCalled();
+    });
+
+    it('a tutor edits their own Admin Time and may not attach a student', async () => {
+      service.getSessionById.mockResolvedValue(adminTime());
+      await controller.updateSession(
+        reqAs(tutor),
+        adminTime({ notes: 'planning' }),
+      );
+      expect(service.updateSession).toHaveBeenCalledTimes(1);
+      await expect(
+        controller.updateSession(
+          reqAs(tutor),
+          adminTime({ student_id: 'st-1' }),
+        ),
+      ).rejects.toThrow(ADMIN_TIME_MESSAGE);
+      expect(service.updateSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('the Admin Time rule does not touch a tutor editing their other sessions', async () => {
+      service.getSessionById.mockResolvedValue(session({ student_id: 'st-1' }));
+      await controller.updateSession(
+        reqAs(tutor),
+        session({ student_id: 'st-1', notes: 'x' }),
+      );
+      expect(service.updateSession).toHaveBeenCalled();
+    });
+
+    it("an admin edits anyone's Admin Time, student or not", async () => {
+      service.getSessionById.mockResolvedValue(adminTime());
+      await controller.updateSession(
+        reqAs(admin),
+        adminTime({ student_id: 'st-1' }),
+      );
+      expect(service.updateSession).toHaveBeenCalled();
+    });
+
+    it('a tutor deletes their own Admin Time, nothing else', async () => {
+      service.getSessionById.mockResolvedValueOnce(adminTime());
+      await controller.deleteSession(reqAs(tutor), 'ta-1');
+      expect(service.deleteSession).toHaveBeenCalledWith('ta-1');
+
+      service.getSessionById.mockResolvedValueOnce(
+        adminTime({ type: SessionType.MAKE_UP }),
+      );
+      await expect(
+        controller.deleteSession(reqAs(tutor), 'ta-1'),
+      ).rejects.toThrow('Unauthorized');
+      service.getSessionById.mockResolvedValueOnce(
+        adminTime({ tutor_id: 'c-other' }),
+      );
+      await expect(
+        controller.deleteSession(reqAs(tutor), 'ta-1'),
+      ).rejects.toThrow('Unauthorized');
+      service.getSessionById.mockResolvedValueOnce(undefined);
+      await expect(
+        controller.deleteSession(reqAs(tutor), 'ta-1'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.deleteSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('a groupless user never reaches the stored-session read on delete', async () => {
+      await expect(
+        controller.deleteSession(reqAs(stranger), 'ta-1'),
+      ).rejects.toThrow('Unauthorized');
+      expect(service.getSessionById).not.toHaveBeenCalled();
     });
   });
 

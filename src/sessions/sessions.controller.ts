@@ -48,10 +48,14 @@ export const SESSION_TYPE_LOCKED_MESSAGE =
 export const SUPPORT_STAFF_MESSAGE =
   'Support staff may only log their own Admin Time.';
 
+export const ADMIN_TIME_MESSAGE =
+  'Admin Time belongs to the tutor who logged it and has no student.';
+
 /**
  * Support Staff log hours as ADMIN (Admin Time) sessions assigned to
  * themselves, with no student and no roster. This is the whole of what the
- * group may write, so every payload they send is held to it.
+ * group may write, so every payload they send is held to it. Tutors log
+ * their own Admin Time under the same rule (client 2026-11-09).
  */
 const isOwnAdminTime = (session: Session, user: User): boolean =>
   session.type === SessionType.ADMIN &&
@@ -188,6 +192,11 @@ export class SessionsController {
     if (isTutorLike(groups) && isOwnMakeup) {
       return this.sessionsService.createSession(session);
     }
+    // Tutors log their own Admin Time too, paid at their hourly rate
+    // (client 2026-11-09), under the same rule as Support Staff.
+    if (isTutorLike(groups) && isOwnAdminTime(session, user)) {
+      return this.sessionsService.createSession(session);
+    }
     // Support Staff log their own hours: an ADMIN session assigned to
     // themselves, nothing else (client 2026-10-15).
     if (isSupportStaff(groups)) {
@@ -276,6 +285,16 @@ export class SessionsController {
     ) {
       Logger.error(`Session ${session.id}: refused a support-staff edit`);
       throw new ForbiddenException(SUPPORT_STAFF_MESSAGE);
+    }
+    // A tutor's Admin Time stays their own and student-free when edited.
+    if (
+      !isAdmin &&
+      !support &&
+      stored?.type === SessionType.ADMIN &&
+      !isOwnAdminTime({ ...stored, ...session }, user)
+    ) {
+      Logger.error(`Session ${session.id}: refused a tutor Admin Time edit`);
+      throw new ForbiddenException(ADMIN_TIME_MESSAGE);
     }
     if (stored && isFinalized(stored.status)) {
       const locked = lockedFieldChanges(stored, session);
@@ -388,6 +407,18 @@ export class SessionsController {
       }
       Logger.error(`Session ${id}: refused a support-staff delete`);
       throw new ForbiddenException(SUPPORT_STAFF_MESSAGE);
+    }
+    // Tutors remove their own Admin Time (a mis-logged block); anything else
+    // stays an admin's call.
+    if (isTutorLike(groups)) {
+      const stored = await this.sessionsService.getSessionById(id);
+      if (
+        stored &&
+        stored.tutor_id === user.contact &&
+        stored.type === SessionType.ADMIN
+      ) {
+        return this.sessionsService.deleteSession(id);
+      }
     }
     Logger.error('Deleting a session is restricted to admins');
     throw new ForbiddenException('Unauthorized');
