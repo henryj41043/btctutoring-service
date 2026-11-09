@@ -19,6 +19,7 @@ import { EmailsModule } from './emails/emails.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ScholarshipsModule } from './scholarships/scholarships.module';
 import { PackagesModule } from './packages/packages.module';
+import { FamilyModule } from './family/family.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PackagesModule } from './packages/packages.module';
     DocumentsModule,
     ScholarshipsModule,
     PackagesModule,
+    FamilyModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtStrategy],
